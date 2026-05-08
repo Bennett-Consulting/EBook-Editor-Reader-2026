@@ -77,6 +77,11 @@ export default function LibraryScreen() {
     }, [load])
   );
 
+  // Safety net for web (idb timing): also load on mount.
+  useEffect(() => {
+    load();
+  }, [load]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
@@ -210,6 +215,17 @@ export default function LibraryScreen() {
               <Text style={styles.draftBadgeText}>DRAFT</Text>
             </View>
           )}
+          <TouchableOpacity
+            testID={`book-edit-${index}`}
+            onPress={(e) => {
+              e.stopPropagation?.();
+              router.push(`/editor/${item.id}`);
+            }}
+            style={styles.editBadge}
+            hitSlop={10}
+          >
+            <Ionicons name="create-outline" size={16} color="#0A0A0B" />
+          </TouchableOpacity>
         </View>
         <Text numberOfLines={1} style={styles.bookTitle}>
           {item.title}
@@ -402,13 +418,28 @@ const styles = StyleSheet.create({
   draftBadge: {
     position: "absolute",
     top: 10,
-    right: 10,
+    left: 10,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
     backgroundColor: "rgba(0,0,0,0.45)",
   },
   draftBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 1.2 },
+  editBadge: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
 
   bookTitle: { color: theme.textPrimary, marginTop: 10, fontSize: 14, fontWeight: "600" },
   bookAuthor: { color: theme.textSecondary, fontSize: 12, marginTop: 2 },
@@ -468,4 +499,6 @@ const styles = StyleSheet.create({
   btnPrimaryText: { color: "#0A0A0B", fontWeight: "700", fontSize: 15 },
   btnGhost: { backgroundColor: theme.surfaceHi, borderWidth: 1, borderColor: theme.border },
   btnGhostText: { color: theme.textPrimary, fontWeight: "600", fontSize: 15 },
+});
+tSize: 15 },
 });

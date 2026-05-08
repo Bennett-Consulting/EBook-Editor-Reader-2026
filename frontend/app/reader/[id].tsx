@@ -24,6 +24,7 @@ import {
   saveBook,
   savePrefs,
 } from "../../src/lib/storage";
+import { exportBook } from "../../src/lib/exporter";
 
 function makeId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -148,6 +149,37 @@ export default function ReaderScreen() {
             {book.author} · {Math.round((book.progress || 0) * 100)}%
           </Text>
         </View>
+        <TouchableOpacity
+          testID="reader-edit"
+          onPress={() => router.push(`/editor/${book.id}`)}
+          style={styles.iconBtn}
+        >
+          <Ionicons
+            name="create-outline"
+            size={20}
+            color={paperMode ? "#222" : theme.textPrimary}
+          />
+        </TouchableOpacity>
+        <TouchableOpacity
+          testID="reader-export"
+          onPress={() =>
+            Alert.alert("Export book", `Export "${book.title}" as:`, [
+              { text: "PDF", onPress: () => exportBook(book, "pdf") },
+              { text: "EPUB", onPress: () => exportBook(book, "epub") },
+              { text: "Word (.docx)", onPress: () => exportBook(book, "docx") },
+              { text: "Markdown (.md)", onPress: () => exportBook(book, "md") },
+              { text: "Plain text (.txt)", onPress: () => exportBook(book, "txt") },
+              { text: "Cancel", style: "cancel" },
+            ])
+          }
+          style={styles.iconBtn}
+        >
+          <Ionicons
+            name="share-outline"
+            size={20}
+            color={paperMode ? "#222" : theme.textPrimary}
+          />
+        </TouchableOpacity>
         <TouchableOpacity
           testID="reader-annotations"
           onPress={() => setShowAnnotations(true)}

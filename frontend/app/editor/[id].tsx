@@ -21,6 +21,7 @@ import { theme, coverPalette } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
 import { getBook, saveBook } from "../../src/lib/storage";
 import { aiSuggest, AIMode } from "../../src/lib/ai";
+import { exportBook } from "../../src/lib/exporter";
 
 export default function EditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -216,7 +217,7 @@ export default function EditorScreen() {
       </View>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
         keyboardVerticalOffset={0}
       >
@@ -380,12 +381,37 @@ export default function EditorScreen() {
               ))}
             </ScrollView>
             <TouchableOpacity
+              testID="export-btn"
+              onPress={() => {
+                if (!book) return;
+                const current: Book = {
+                  ...book,
+                  title,
+                  author,
+                  content,
+                  coverColor,
+                };
+                Alert.alert("Export book", `Export "${title || "Untitled"}" as:`, [
+                  { text: "PDF", onPress: () => exportBook(current, "pdf") },
+                  { text: "EPUB", onPress: () => exportBook(current, "epub") },
+                  { text: "Word (.docx)", onPress: () => exportBook(current, "docx") },
+                  { text: "Markdown (.md)", onPress: () => exportBook(current, "md") },
+                  { text: "Plain text (.txt)", onPress: () => exportBook(current, "txt") },
+                  { text: "Cancel", style: "cancel" },
+                ]);
+              }}
+              style={[styles.btn, styles.btnGhost, { marginTop: 14 }]}
+            >
+              <Ionicons name="share-outline" size={18} color={theme.textPrimary} />
+              <Text style={[styles.btnGhostText, { marginLeft: 8 }]}>Export…</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               testID="preview-btn"
               onPress={() => {
                 setShowMeta(false);
                 router.push(`/reader/${book.id}`);
               }}
-              style={[styles.btn, styles.btnGhost, { marginTop: 14 }]}
+              style={[styles.btn, styles.btnGhost, { marginTop: 10 }]}
             >
               <Ionicons name="eye-outline" size={18} color={theme.textPrimary} />
               <Text style={[styles.btnGhostText, { marginLeft: 8 }]}>Preview as reader</Text>
