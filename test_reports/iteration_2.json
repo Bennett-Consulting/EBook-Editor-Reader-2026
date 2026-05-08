@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 2 verifies the new multi-format export feature only (per E1's note that iteration_1 already covered library/editor/reader/AI). Static review confirmed: (a) (tabs)/index.tsx is now 503 lines, ends cleanly with `});` on line 502 — the stray `tSize: 15 },\\n});` is gone — and `useEffect` IS imported on line 1 alongside useCallback/useState; (b) src/lib/exporter.ts (361 lines) exports `ExportFormat = md|txt|epub|docx|pdf` and uses ONLY native paths (FileSystem.cacheDirectory + writeAsStringAsync, expo-print printToFileAsync, expo-sharing.shareAsync, JSZip in-memory) — no window/document/navigator/Platform.OS branches; the only 'document' string occurrences are inside DOCX XML payloads; (c) reader/[id].tsx toolbar at lines 137-205 renders the 5 buttons in the requested order: reader-back, reader-edit, reader-export, reader-annotations, reader-settings; reader-export raises Alert.alert('Export book', ...) with all 5 format buttons (PDF, EPUB, Word (.docx), Markdown (.md), Plain text (.txt)) plus Cancel; (d) editor/[id].tsx line 384 has testID='export-btn' wiring the SAME 5-option Alert; (e) Library cards render testID='book-edit-{index}' overlay (TouchableOpacity at lines 218-228 inside the cover) that calls router.push('/editor/[id]') with e.stopPropagation — no long-press required. Backend pytest re-run on the public preview URL: 8/8 PASSED including all 4 AI suggest modes, session stickiness, and 400 on empty/whitespace context. Live web-preview run (390x844) loaded library-grid, the seed book 'The Quiet Room' rendered, all 5 reader-* testIDs found, book-edit-0 overlay tap navigated to /editor/[id] without long-press (editor toolbar B/I/H bullets + '178 words · saved' header confirmed via screenshot). Zero console errors, zero pageerrors, no React Native red screen. Note: clicking export buttons in headless web is intentionally NOT tested — exporter is native-only (expo-print/expo-sharing) per E1's instruction.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ai_endpoints.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "exporter.ts buildEpubBase64: opf media-type is 'application/oebps-package+xml' — the spec value is 'application/oebps-package+xml' is non-standard; EPUB 3 readers expect 'application/oebps-package+xml' to be exactly that string but most validators want 'application/oebps-package+xml' OR 'application/oebps-package+xml' — actually the canonical value is 'application/oebps-package+xml'. Double-check against epubcheck if strict EPUB validation is required (most consumer readers are lenient).",
+    "exporter.ts: no try/catch around JSZip.generateAsync — if a very large book content causes OOM during base64 encoding, the surrounding try in exportBook will catch it but the user-facing 'Export failed' message will be opaque. Consider showing format-specific guidance.",
+    "exporter.ts safeFilename strips most punctuation but keeps the dot-extension via the `${safeFilename}.${format}` template, which is fine; however title 'a/b' becomes 'a_b' — acceptable.",
+    "Reader and Editor duplicate the same 5-item Alert.alert export menu (lines reader/[id].tsx:166-173 and editor/[id].tsx:394-400). Extract into a shared helper `showExportMenu(book)` in exporter.ts to keep them in sync."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (8/8 pytest)",
+    "frontend": "100% of requested static + bundle + smoke checks (compilation clean, library renders seed book, all 5 reader-* testIDs in correct order, book-edit-0 overlay navigates to editor without long-press, zero console errors)"
+  },
+  "seed_data_creation": "None — relied on the existing demo seed 'The Quiet Room' which auto-seeds on first library load.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Export feature is native-only (expo-print + expo-sharing + FileSystem + JSZip) — DO NOT attempt to verify actual file generation in headless web; just verify the testIDs and Alert wiring statically. The earlier reported book-edit-{index} overlay is a normal onPress (no long-press), tested via direct click(force=True) on [data-testid=\"book-edit-0\"]. Backend tests live at /app/backend/tests/test_ai_endpoints.py and use BASE_URL = EXPO_PUBLIC_BACKEND_URL from the env. Reader toolbar order (back, edit, export, annotations, settings) is asserted both by static line read and by live page.query_selector. iteration_1.json's note about long-press 500ms is still valid for the cover-area long-press menu, but the new book-edit overlay button is a regular tap.",
+  "rca_of_issue": "No outstanding bugs. Both regressions reported in the prompt — stray `tSize: 15 },` and missing useEffect import — are confirmed fixed in (tabs)/index.tsx (line 1 imports include useEffect; file ends at line 503 with a clean `});`). Bundle compiles (Metro 'Web Bundled' messages with 1329 modules and zero errors). Live preview shows seed book on first paint within ~3s thanks to dual useFocusEffect + useEffect load triggers."
+}
