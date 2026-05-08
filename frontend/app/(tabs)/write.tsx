@@ -5,13 +5,14 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  Alert,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { coverPalette, theme } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
-import { getBooks, saveBook } from "../../src/lib/storage";
+import { getBooks, saveBook, deleteBook } from "../../src/lib/storage";
 
 function makeId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -51,6 +52,24 @@ export default function WriteTab() {
     router.push(`/editor/${book.id}`);
   };
 
+  const confirmDelete = (b: Book) => {
+    Alert.alert(
+      "Delete draft?",
+      `"${b.title || "Untitled"}" will be removed permanently.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            await deleteBook(b.id);
+            await load();
+          },
+        },
+      ]
+    );
+  };
+
   const renderItem = ({ item, index }: { item: Book; index: number }) => (
     <TouchableOpacity
       testID={`draft-row-${index}`}
@@ -69,6 +88,14 @@ export default function WriteTab() {
           {item.content.length} chars · {new Date(item.updatedAt).toLocaleDateString()}
         </Text>
       </View>
+      <TouchableOpacity
+        testID={`draft-delete-${index}`}
+        onPress={() => confirmDelete(item)}
+        hitSlop={10}
+        style={styles.trashBtn}
+      >
+        <Ionicons name="trash-outline" size={18} color="#ff6b6b" />
+      </TouchableOpacity>
       <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
     </TouchableOpacity>
   );
@@ -148,6 +175,15 @@ const styles = StyleSheet.create({
   swatch: { width: 44, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   rowTitle: { color: theme.textPrimary, fontSize: 15, fontWeight: "600" },
   rowMeta: { color: theme.textSecondary, fontSize: 12, marginTop: 3 },
+  trashBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,107,107,0.08)",
+    marginRight: 4,
+  },
 
   empty: { alignItems: "center", paddingVertical: 60 },
   emptyTitle: { color: theme.textPrimary, fontSize: 17, fontWeight: "600", marginBottom: 6 },

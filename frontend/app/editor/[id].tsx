@@ -19,7 +19,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { theme, coverPalette } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
-import { getBook, saveBook } from "../../src/lib/storage";
+import { getBook, saveBook, deleteBook } from "../../src/lib/storage";
 import { aiSuggest, AIMode } from "../../src/lib/ai";
 import { exportBook } from "../../src/lib/exporter";
 
@@ -415,6 +415,31 @@ export default function EditorScreen() {
             >
               <Ionicons name="eye-outline" size={18} color={theme.textPrimary} />
               <Text style={[styles.btnGhostText, { marginLeft: 8 }]}>Preview as reader</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID="delete-book-btn"
+              onPress={() => {
+                Alert.alert(
+                  "Delete book?",
+                  `"${title || "Untitled"}" will be removed permanently. This cannot be undone.`,
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Delete",
+                      style: "destructive",
+                      onPress: async () => {
+                        await deleteBook(book.id);
+                        setShowMeta(false);
+                        router.replace("/");
+                      },
+                    },
+                  ]
+                );
+              }}
+              style={[styles.btn, styles.btnDanger, { marginTop: 10 }]}
+            >
+              <Ionicons name="trash-outline" size={18} color="#ff6b6b" />
+              <Text style={[styles.btnDangerText, { marginLeft: 8 }]}>Delete book</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
