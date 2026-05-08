@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import * as Print from "expo-print";
-import { Alert } from "react-native";
+import { Alert, Platform } from "react-native";
 import JSZip from "jszip";
 import { Book } from "./types";
 
@@ -13,19 +13,14 @@ function safeFilename(name: string) {
 
 function escapeXml(s: string) {
   return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
 function buildPlainText(book: Book, format: "md" | "txt"): string {
-  const header =
-    format === "md"
-      ? `# ${book.title}\n\n_by ${book.author}_\n\n---\n\n`
-      : `${book.title}\nby ${book.author}\n\n${"=".repeat(40)}\n\n`;
-
+  const header = format === "md"
+    ? `# ${book.title}\n\n_by ${book.author}_\n\n---\n\n`
+    : `${book.title}\nby ${book.author}\n\n${"=".repeat(40)}\n\n`;
   let body = book.content || "";
   if (book.annotations.length > 0) {
     const notes = book.annotations
@@ -33,50 +28,30 @@ function buildPlainText(book: Book, format: "md" | "txt"): string {
       .map((a, i) => `${i + 1}. "${a.text.slice(0, 120).trim()}"\n   — ${a.note}`)
       .join("\n\n");
     if (notes) {
-      body +=
-        format === "md"
-          ? `\n\n---\n\n## Notes\n\n${notes}\n`
-          : `\n\n${"=".repeat(40)}\nNotes\n\n${notes}\n`;
+      body += format === "md"
+        ? `\n\n---\n\n## Notes\n\n${notes}\n`
+        : `\n\n${"=".repeat(40)}\nNotes\n\n${notes}\n`;
     }
   }
   return header + body;
 }
 
-interface Block {
-  kind: "h" | "p" | "quote" | "ul" | "ol";
-  level?: number;
-  text?: string;
-  items?: string[];
-}
+interface Block { kind: "h"|"p"|"quote"|"ul"|"ol"; level?: number; text?: string; items?: string[]; }
 
 function parseBlocks(content: string): Block[] {
   const out: Block[] = [];
-  const blocks = (content || "").split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  const blocks = (content || "").split(/\n\s*\n/).map(b=>b.trim()).filter(Boolean);
   for (const b of blocks) {
     const h = b.match(/^(#{1,6})\s+(.*)$/);
-    if (h) {
-      out.push({ kind: "h", level: h[1].length, text: h[2] });
-      continue;
-    }
-    if (/^>\s/.test(b)) {
-      out.push({ kind: "quote", text: b.replace(/^>\s?/gm, "") });
-      continue;
-    }
+    if (h) { out.push({ kind: "h", level: h[1].length, text: h[2] }); continue; }
+    if (/^>\s/.test(b)) { out.push({ kind: "quote", text: b.replace(/^>\s?/gm, "") }); continue; }
     if (/^[-*]\s/.test(b)) {
-      const items = b
-        .split(/\n/)
-        .filter((l) => /^[-*]\s/.test(l))
-        .map((l) => l.replace(/^[-*]\s+/, ""));
-      out.push({ kind: "ul", items });
-      continue;
+      const items = b.split(/\n/).filter(l=>/^[-*]\s/.test(l)).map(l=>l.replace(/^[-*]\s+/, ""));
+      out.push({ kind: "ul", items }); continue;
     }
     if (/^\d+\.\s/.test(b)) {
-      const items = b
-        .split(/\n/)
-        .filter((l) => /^\d+\.\s/.test(l))
-        .map((l) => l.replace(/^\d+\.\s+/, ""));
-      out.push({ kind: "ol", items });
-      continue;
+      const items = b.split(/\n/).filter(l=>/^\d+\.\s/.test(l)).map(l=>l.replace(/^\d+\.\s+/, ""));
+      out.push({ kind: "ol", items }); continue;
     }
     out.push({ kind: "p", text: b });
   }
@@ -84,42 +59,58 @@ function parseBlocks(content: string): Block[] {
 }
 
 function blocksToHtmlBody(blocks: Block[]): string {
-  return blocks
-    .map((b) => {
-      if (b.kind === "h") {
-        return `<h${b.level}>${escapeXml(b.text || "")}</h${b.level}>`;
-      }
-      if (b.kind === "quote") {
-        return `<blockquote><p>${escapeXml(b.text || "").replace(/\n/g, "<br/>")}</p></blockquote>`;
-      }
-      if (b.kind === "ul") {
-        return `<ul>${(b.items || []).map((i) => `<li>${escapeXml(i)}</li>`).join("")}</ul>`;
-      }
-      if (b.kind === "ol") {
-        return `<ol>${(b.items || []).map((i) => `<li>${escapeXml(i)}</li>`).join("")}</ol>`;
-      }
-      let safe = escapeXml(b.text || "");
-      safe = safe.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-      safe = safe.replace(/_([^_]+)_/g, "<em>$1</em>");
-      return `<p>${safe.replace(/\n/g, "<br/>")}</p>`;
-    })
-    .join("\n");
+  return blocks.map((b) => {
+    if (b.kind === "h") return `<h${b.level}>${escapeXml(b.text || "")}</h${b.level}>`;
+    if (b.kind === "quote") return `<blockquote><p>${escapeXml(b.text || "").replace(/\n/g, "<br/>")}</p></blockquote>`;
+    if (b.kind === "ul") return `<ul>${(b.items||[]).map(i=>`<li>${escapeXml(i)}</li>`).join("")}</ul>`;
+    if (b.kind === "ol") return `<ol>${(b.items||[]).map(i=>`<li>${escapeXml(i)}</li>`).join("")}</ol>`;
+    let safe = escapeXml(b.text || "");
+    safe = safe.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    safe = safe.replace(/_([^_]+)_/g, "<em>$1</em>");
+    return `<p>${safe.replace(/\n/g, "<br/>")}</p>`;
+  }).join("\n");
+}
+
+function buildPrintableHtml(book: Book): string {
+  const blocks = parseBlocks(book.content || "");
+  let notes = "";
+  if (book.annotations.length > 0) {
+    const items = book.annotations.map(a =>
+      `<li><blockquote>${escapeXml(a.text.slice(0, 200))}</blockquote>${a.note ? `<p><em>— ${escapeXml(a.note)}</em></p>` : ""}</li>`).join("");
+    notes = `<hr/><h2>Notes &amp; Highlights</h2><ol>${items}</ol>`;
+  }
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/>
+<title>${escapeXml(book.title || "Untitled")}</title>
+<style>
+  @page { size: A5; margin: 22mm; }
+  body { font-family: Georgia, "Times New Roman", serif; line-height: 1.7; color: #1a1a1a; }
+  h1 { font-size: 28pt; margin: 0 0 0.2em; letter-spacing: -0.5px; }
+  h2 { font-size: 18pt; margin-top: 1.4em; }
+  h3 { font-size: 14pt; }
+  .author { color: #666; font-style: italic; margin-bottom: 2em; }
+  p { margin: 0 0 1em; text-align: justify; }
+  blockquote { border-left: 3px solid #c89a3a; padding-left: 1em; color: #444; margin: 1em 0; }
+  ul, ol { padding-left: 1.4em; }
+  hr { border: 0; border-top: 1px solid #ddd; margin: 2em 0; }
+</style></head><body>
+<h1>${escapeXml(book.title || "Untitled")}</h1>
+<p class="author">by ${escapeXml(book.author || "Anonymous")}</p>
+${blocksToHtmlBody(blocks)}
+${notes}
+</body></html>`;
 }
 
 // --------------------------- EPUB --------------------------------
-async function buildEpubBase64(book: Book): Promise<string> {
+async function buildEpub(book: Book, asBlob: boolean): Promise<Blob | string> {
   const zip = new JSZip();
   const id = `urn:uuid:${book.id}`;
   zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
-  zip.folder("META-INF")!.file(
-    "container.xml",
+  zip.folder("META-INF")!.file("container.xml",
     `<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
-  <rootfiles>
-    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
-  </rootfiles>
-</container>`
-  );
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>`);
   const opf = `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="en">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -145,14 +136,8 @@ async function buildEpubBase64(book: Book): Promise<string> {
   const blocks = parseBlocks(book.content || "");
   let notes = "";
   if (book.annotations.length > 0) {
-    const items = book.annotations
-      .map(
-        (a) =>
-          `<li><blockquote>${escapeXml(a.text.slice(0, 200))}</blockquote>${
-            a.note ? `<p><em>— ${escapeXml(a.note)}</em></p>` : ""
-          }</li>`
-      )
-      .join("");
+    const items = book.annotations.map(a =>
+      `<li><blockquote>${escapeXml(a.text.slice(0, 200))}</blockquote>${a.note ? `<p><em>— ${escapeXml(a.note)}</em></p>` : ""}</li>`).join("");
     notes = `<hr/><h2>Notes &amp; Highlights</h2><ol>${items}</ol>`;
   }
   const chapter = `<?xml version="1.0" encoding="UTF-8"?>
@@ -176,77 +161,57 @@ ul,ol{padding-left:1.4em}`;
   oebps.file("nav.xhtml", nav);
   oebps.file("chapter1.xhtml", chapter);
   oebps.file("style.css", css);
+  if (asBlob) return await zip.generateAsync({ type: "blob", mimeType: "application/epub+zip" });
   return await zip.generateAsync({ type: "base64" });
 }
 
 // --------------------------- DOCX --------------------------------
-function docxParagraph(
-  text: string,
-  opts: { style?: string; bold?: boolean; italic?: boolean } = {}
-) {
+function docxParagraph(text: string, opts: { style?: string; bold?: boolean; italic?: boolean } = {}) {
   const styleXml = opts.style ? `<w:pStyle w:val="${opts.style}"/>` : "";
-  const rPr =
-    opts.bold || opts.italic
-      ? `<w:rPr>${opts.bold ? "<w:b/>" : ""}${opts.italic ? "<w:i/>" : ""}</w:rPr>`
-      : "";
+  const rPr = (opts.bold || opts.italic) ? `<w:rPr>${opts.bold?"<w:b/>":""}${opts.italic?"<w:i/>":""}</w:rPr>` : "";
   return `<w:p><w:pPr>${styleXml}</w:pPr><w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
 }
 
 function blocksToDocxBody(blocks: Block[]): string {
   const out: string[] = [];
   for (const b of blocks) {
-    if (b.kind === "h") {
-      out.push(docxParagraph(b.text || "", { style: `Heading${Math.min(b.level || 1, 3)}` }));
-    } else if (b.kind === "quote") {
-      out.push(docxParagraph(b.text || "", { style: "Quote", italic: true }));
-    } else if (b.kind === "ul" || b.kind === "ol") {
-      for (const item of b.items || []) {
-        out.push(docxParagraph(`• ${item}`));
-      }
-    } else {
-      out.push(docxParagraph(b.text || ""));
-    }
+    if (b.kind === "h") out.push(docxParagraph(b.text || "", { style: `Heading${Math.min(b.level||1, 3)}` }));
+    else if (b.kind === "quote") out.push(docxParagraph(b.text || "", { style: "Quote", italic: true }));
+    else if (b.kind === "ul" || b.kind === "ol") (b.items||[]).forEach(item => out.push(docxParagraph(`• ${item}`)));
+    else out.push(docxParagraph(b.text || ""));
   }
   return out.join("");
 }
 
-async function buildDocxBase64(book: Book): Promise<string> {
+async function buildDocx(book: Book, asBlob: boolean): Promise<Blob | string> {
   const zip = new JSZip();
-  zip.file(
-    "[Content_Types].xml",
+  zip.file("[Content_Types].xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-</Types>`
-  );
-  zip.folder("_rels")!.file(
-    ".rels",
+</Types>`);
+  zip.folder("_rels")!.file(".rels",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>`
-  );
+</Relationships>`);
   const word = zip.folder("word")!;
-  word.folder("_rels")!.file(
-    "document.xml.rels",
+  word.folder("_rels")!.file("document.xml.rels",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>`
-  );
-  word.file(
-    "styles.xml",
+</Relationships>`);
+  word.file("styles.xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="40"/></w:rPr></w:style>
   <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:pPr><w:spacing w:before="200" w:after="100"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style>
   <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:pPr><w:spacing w:before="160" w:after="80"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style>
   <w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:pPr><w:ind w:left="720"/></w:pPr><w:rPr><w:i/><w:color w:val="595959"/></w:rPr></w:style>
-</w:styles>`
-  );
+</w:styles>`);
 
   const blocks = parseBlocks(book.content || "");
   const titlePara = docxParagraph(book.title || "Untitled", { style: "Heading1" });
@@ -256,7 +221,7 @@ async function buildDocxBase64(book: Book): Promise<string> {
   if (book.annotations.length > 0) {
     notesParas += docxParagraph("Notes & Highlights", { style: "Heading2" });
     book.annotations.forEach((a, i) => {
-      notesParas += docxParagraph(`${i + 1}. "${a.text.slice(0, 200)}"`, { style: "Quote", italic: true });
+      notesParas += docxParagraph(`${i+1}. "${a.text.slice(0, 200)}"`, { style: "Quote", italic: true });
       if (a.note) notesParas += docxParagraph(`— ${a.note}`);
     });
   }
@@ -264,57 +229,90 @@ async function buildDocxBase64(book: Book): Promise<string> {
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
-    ${titlePara}
-    ${authorPara}
-    ${bodyParas}
-    ${notesParas}
+    ${titlePara}${authorPara}${bodyParas}${notesParas}
     <w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>
   </w:body>
 </w:document>`;
   word.file("document.xml", documentXml);
+
+  if (asBlob) {
+    return await zip.generateAsync({
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+  }
   return await zip.generateAsync({ type: "base64" });
 }
 
-// --------------------------- PDF (native via expo-print) --------------------------------
-function buildPrintableHtml(book: Book): string {
-  const blocks = parseBlocks(book.content || "");
-  let notes = "";
-  if (book.annotations.length > 0) {
-    const items = book.annotations
-      .map(
-        (a) =>
-          `<li><blockquote>${escapeXml(a.text.slice(0, 200))}</blockquote>${
-            a.note ? `<p><em>— ${escapeXml(a.note)}</em></p>` : ""
-          }</li>`
-      )
-      .join("");
-    notes = `<hr/><h2>Notes &amp; Highlights</h2><ol>${items}</ol>`;
+// --------------------------- WEB helpers --------------------------------
+function downloadBlobWeb(blob: Blob, filename: string) {
+  // @ts-ignore
+  const url = window.URL.createObjectURL(blob);
+  // @ts-ignore
+  const a = window.document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  // @ts-ignore
+  window.document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // @ts-ignore
+  setTimeout(() => window.URL.revokeObjectURL(url), 1500);
+}
+
+function printPdfWeb(book: Book) {
+  const html = buildPrintableHtml(book);
+  // Open a new tab/window so the browser print dialog appears with "Save as PDF".
+  // @ts-ignore
+  const w = window.open("", "_blank");
+  if (!w) {
+    // popup blocked — fall back to a hidden iframe
+    // @ts-ignore
+    const frame = window.document.createElement("iframe");
+    frame.style.position = "fixed"; frame.style.right="0"; frame.style.bottom="0";
+    frame.style.width="0"; frame.style.height="0"; frame.style.border="0";
+    // @ts-ignore
+    window.document.body.appendChild(frame);
+    const fdoc = frame.contentDocument || frame.contentWindow?.document;
+    if (!fdoc) throw new Error("Could not create print frame (popup blocker may be active)");
+    fdoc.open(); fdoc.write(html); fdoc.close();
+    setTimeout(() => { frame.contentWindow?.focus(); frame.contentWindow?.print(); }, 350);
+    setTimeout(() => frame.remove(), 5000);
+    return;
   }
-  return `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"/>
-<title>${escapeXml(book.title || "Untitled")}</title>
-<style>
-  @page { size: A5; margin: 22mm; }
-  body { font-family: Georgia, "Times New Roman", serif; line-height: 1.7; color: #1a1a1a; }
-  h1 { font-size: 28pt; margin: 0 0 0.2em; letter-spacing: -0.5px; }
-  h2 { font-size: 18pt; margin-top: 1.4em; }
-  h3 { font-size: 14pt; }
-  .author { color: #666; font-style: italic; margin-bottom: 2em; }
-  p { margin: 0 0 1em; text-align: justify; }
-  blockquote { border-left: 3px solid #c89a3a; padding-left: 1em; color: #444; margin: 1em 0; }
-  ul, ol { padding-left: 1.4em; }
-  hr { border: 0; border-top: 1px solid #ddd; margin: 2em 0; }
-</style></head><body>
-<h1>${escapeXml(book.title || "Untitled")}</h1>
-<p class="author">by ${escapeXml(book.author || "Anonymous")}</p>
-${blocksToHtmlBody(blocks)}
-${notes}
-</body></html>`;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => { try { w.focus(); w.print(); } catch {} }, 400);
 }
 
 // --------------------------- Main export ----------------------------------
 export async function exportBook(book: Book, format: ExportFormat) {
   const filename = `${safeFilename(book.title)}.${format}`;
+
+  // ---------- WEB ----------
+  if (Platform.OS === "web") {
+    try {
+      if (format === "pdf") {
+        printPdfWeb(book);
+        return;
+      }
+      let blob: Blob;
+      if (format === "epub")      blob = await buildEpub(book, true) as Blob;
+      else if (format === "docx") blob = await buildDocx(book, true) as Blob;
+      else {
+        const text = buildPlainText(book, format);
+        blob = new Blob([text], { type: format === "md" ? "text/markdown" : "text/plain" });
+      }
+      downloadBlobWeb(blob, filename);
+    } catch (e: any) {
+      // eslint-disable-next-line no-undef
+      if (typeof window !== "undefined") window.alert(`Export failed: ${e?.message ?? "Unknown error"}`);
+    }
+    return;
+  }
+
+  // ---------- NATIVE (Android / iOS) ----------
   try {
     const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
     if (!dir) throw new Error("No writable directory available");
@@ -322,18 +320,13 @@ export async function exportBook(book: Book, format: ExportFormat) {
     let mime = "text/plain";
 
     if (format === "epub") {
-      const base64 = await buildEpubBase64(book);
-      await FileSystem.writeAsStringAsync(uri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      const base64 = await buildEpub(book, false) as string;
+      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
       mime = "application/epub+zip";
     } else if (format === "docx") {
-      const base64 = await buildDocxBase64(book);
-      await FileSystem.writeAsStringAsync(uri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      mime =
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      const base64 = await buildDocx(book, false) as string;
+      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+      mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     } else if (format === "pdf") {
       const html = buildPrintableHtml(book);
       const result = await Print.printToFileAsync({ html, base64: false });

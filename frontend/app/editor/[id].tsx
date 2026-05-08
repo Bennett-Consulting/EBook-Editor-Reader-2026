@@ -21,7 +21,8 @@ import { theme, coverPalette } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
 import { getBook, saveBook, deleteBook } from "../../src/lib/storage";
 import { aiSuggest, AIMode } from "../../src/lib/ai";
-import { exportBook } from "../../src/lib/exporter";
+import { confirmAction } from "../../src/lib/dialogs";
+import ExportSheet from "../../src/components/ExportSheet";
 
 export default function EditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -39,6 +40,7 @@ export default function EditorScreen() {
   const [aiMode, setAiMode] = useState<AIMode>("continue");
 
   const [showMeta, setShowMeta] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const [redoStack, setRedoStack] = useState<string[]>([]);
   const inputRef = useRef<TextInput>(null);
@@ -383,22 +385,8 @@ export default function EditorScreen() {
             <TouchableOpacity
               testID="export-btn"
               onPress={() => {
-                if (!book) return;
-                const current: Book = {
-                  ...book,
-                  title,
-                  author,
-                  content,
-                  coverColor,
-                };
-                Alert.alert("Export book", `Export "${title || "Untitled"}" as:`, [
-                  { text: "PDF", onPress: () => exportBook(current, "pdf") },
-                  { text: "EPUB", onPress: () => exportBook(current, "epub") },
-                  { text: "Word (.docx)", onPress: () => exportBook(current, "docx") },
-                  { text: "Markdown (.md)", onPress: () => exportBook(current, "md") },
-                  { text: "Plain text (.txt)", onPress: () => exportBook(current, "txt") },
-                  { text: "Cancel", style: "cancel" },
-                ]);
+                setShowMeta(false);
+                setTimeout(() => setShowExport(true), 150);
               }}
               style={[styles.btn, styles.btnGhost, { marginTop: 14 }]}
             >
@@ -419,21 +407,14 @@ export default function EditorScreen() {
             <TouchableOpacity
               testID="delete-book-btn"
               onPress={() => {
-                Alert.alert(
+                confirmAction(
                   "Delete book?",
                   `"${title || "Untitled"}" will be removed permanently. This cannot be undone.`,
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Delete",
-                      style: "destructive",
-                      onPress: async () => {
-                        await deleteBook(book.id);
-                        setShowMeta(false);
-                        router.replace("/");
-                      },
-                    },
-                  ]
+                  async () => {
+                    await deleteBook(book.id);
+                    setShowMeta(false);
+                    router.replace("/");
+                  }
                 );
               }}
               style={[styles.btn, styles.btnDanger, { marginTop: 10 }]}
@@ -444,6 +425,12 @@ export default function EditorScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ExportSheet
+        visible={showExport}
+        book={book ? { ...book, title, author, content, coverColor } : null}
+        onClose={() => setShowExport(false)}
+      />
     </SafeAreaView>
   );
 }

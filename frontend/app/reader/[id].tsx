@@ -25,6 +25,7 @@ import {
   savePrefs,
 } from "../../src/lib/storage";
 import { exportBook } from "../../src/lib/exporter";
+import ExportSheet from "../../src/components/ExportSheet";
 
 function makeId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -37,6 +38,7 @@ export default function ReaderScreen() {
   const [prefs, setPrefs] = useState<ReaderPrefs>(defaultPrefs);
   const [showSettings, setShowSettings] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [highlightModal, setHighlightModal] = useState<{
     visible: boolean;
     paraIndex: number;
@@ -162,16 +164,7 @@ export default function ReaderScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           testID="reader-export"
-          onPress={() =>
-            Alert.alert("Export book", `Export "${book.title}" as:`, [
-              { text: "PDF", onPress: () => exportBook(book, "pdf") },
-              { text: "EPUB", onPress: () => exportBook(book, "epub") },
-              { text: "Word (.docx)", onPress: () => exportBook(book, "docx") },
-              { text: "Markdown (.md)", onPress: () => exportBook(book, "md") },
-              { text: "Plain text (.txt)", onPress: () => exportBook(book, "txt") },
-              { text: "Cancel", style: "cancel" },
-            ])
-          }
+          onPress={() => setShowExport(true)}
           style={styles.iconBtn}
         >
           <Ionicons
@@ -408,6 +401,12 @@ export default function ReaderScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <ExportSheet
+        visible={showExport}
+        book={book}
+        onClose={() => setShowExport(false)}
+      />
     </SafeAreaView>
   );
 }

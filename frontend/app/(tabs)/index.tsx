@@ -22,6 +22,7 @@ import * as FileSystem from "expo-file-system";
 import { coverPalette, sampleBookContent, theme } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
 import { getBooks, saveBook, deleteBook } from "../../src/lib/storage";
+import { confirmAction } from "../../src/lib/dialogs";
 
 const { width } = Dimensions.get("window");
 const COL = 2;
@@ -91,7 +92,17 @@ export default function LibraryScreen() {
   const importFile = async () => {
     try {
       const res = await DocumentPicker.getDocumentAsync({
-        type: ["text/plain", "text/markdown", "application/epub+zip", "*/*"],
+        // Restrict to text-based formats so Android Chrome's file input doesn't
+        // surface a "Camera / Take photo" option in the picker.
+        type: [
+          "text/plain",
+          "text/markdown",
+          "text/x-markdown",
+          "application/epub+zip",
+          ".txt",
+          ".md",
+          ".epub",
+        ],
         copyToCacheDirectory: true,
         multiple: false,
       });
@@ -179,18 +190,14 @@ export default function LibraryScreen() {
   };
 
   const onLongPress = (b: Book) => {
-    Alert.alert(b.title, "Choose an action", [
-      { text: "Edit", onPress: () => router.push(`/editor/${b.id}`) },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          await deleteBook(b.id);
-          await load();
-        },
-      },
-      { text: "Cancel", style: "cancel" },
-    ]);
+    confirmAction(
+      `Delete "${b.title}"?`,
+      "This book will be removed permanently from your device.",
+      async () => {
+        await deleteBook(b.id);
+        await load();
+      }
+    );
   };
 
   const renderItem = ({ item, index }: { item: Book; index: number }) => {
