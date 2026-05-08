@@ -1,62 +1,73 @@
-# Ebook Reader & Editor — PRD
+# Ebook Reader & Editor — PRD (Android Standalone)
 
 ## Vision
-A dark-first, premium mobile ebook reader and editor that runs on Android via Expo Go. Users can import their own .txt and .md books, read them with comfortable typography, highlight passages, write entirely new books with a rich-text-style editor, and get AI assistance while writing.
+A dark-first, premium **standalone Android ebook reader and editor**. Users import their own books, read them with comfortable typography, highlight passages, write entirely new books with a rich-text-style editor, get AI assistance while writing, and **export their work in 5 industry formats**.
 
-## User Choices (provided by user)
-- Formats: TXT / Markdown / EPUB (best fidelity for .txt and .md; .epub imported as raw text)
-- Editor: rich text editor + annotations on existing books
-- Storage: local-only (AsyncStorage on the device)
-- AI feature: AI writing assistant
+## User Choices (confirmed)
+- Platform: **Android-only standalone app** (runs in Expo Go for testing; APK via EAS Build for distribution)
+- Formats supported (read & import): TXT, Markdown, EPUB
+- Formats supported (export): **TXT, MD, EPUB, DOCX, PDF**
+- Editor: rich-text editor + annotations on existing books
+- Storage: local-only (AsyncStorage)
+- AI: writing assistant (Emergent LLM key)
 - Design: modern, dark-first
 
 ## Tech Stack
-- **Frontend**: React Native + Expo SDK 54, expo-router (file-based routing), TypeScript
+- **Frontend**: React Native + Expo SDK 54, expo-router, TypeScript
 - **Backend**: FastAPI (only used as a thin proxy for the AI assistant)
 - **AI**: `emergentintegrations` LlmChat with `gpt-4o-mini` (Emergent Universal Key)
 - **Local storage**: `@react-native-async-storage/async-storage`
-- **File picking**: `expo-document-picker` + `expo-file-system`
+- **File I/O**: `expo-document-picker`, `expo-file-system`, `expo-sharing`, `expo-print`
+- **Document building**: `jszip` (EPUB + DOCX containers)
 
 ## Routes
-- `/(tabs)/index` — Library (book grid, import, create new)
+- `/(tabs)/index` — Library (book grid, import, create new, edit overlay)
 - `/(tabs)/write` — Drafts list + new draft button
 - `/(tabs)/settings` — Reading preferences, erase data
-- `/reader/[id]` — Immersive reader with toolbar, settings sheet, annotations sheet, long-press highlight modal
-- `/editor/[id]` — Editor with floating toolbar (B/i/H/list/quote/undo/redo) + AI drawer (continue/improve/shorten/expand) + cover meta sheet
+- `/reader/[id]` — Immersive reader: back / edit / export / annotations / settings toolbar; long-press paragraph to highlight
+- `/editor/[id]` — Editor: title/author/content + floating toolbar (B/i/H/list/quote/undo/redo/AI) + meta sheet (cover color, **Export…**, Preview)
 
 ## Backend Endpoints
-- `POST /api/ai/suggest` — body: `{ context, mode, session_id? }`, returns `{ suggestion, session_id }`. Modes: `continue | improve | shorten | expand`.
-- `GET /api/` — health check
-- `GET/POST /api/status` — original status check (kept)
+- `POST /api/ai/suggest` — `{ context, mode, session_id? }` → `{ suggestion, session_id }`. Modes: `continue | improve | shorten | expand`.
+- `GET /api/` — health check.
 
-## Data Model (local)
+## Export pipeline (Android)
+| Format | How it's built |
+|---|---|
+| `.txt` | Plain UTF-8 string written via `FileSystem.writeAsStringAsync` |
+| `.md`  | Markdown header + body + notes, written as UTF-8 |
+| `.epub` | Built with JSZip (mimetype + container.xml + OEBPS/content.opf + nav.xhtml + chapter1.xhtml + style.css), written as base64 |
+| `.docx` | Built with JSZip (Open XML: `[Content_Types].xml` + `_rels` + `word/document.xml` + `word/styles.xml`), written as base64 |
+| `.pdf` | `expo-print.printToFileAsync` renders the styled HTML into a real PDF via the Android PDF engine |
+After writing, the file is shared with `Sharing.shareAsync` so the user can save to Drive, email it, send to Kindle, etc.
+
+## Data Model
 ```ts
-Book {
-  id, title, author, content, format, coverColor, coverEmoji?,
-  createdAt, updatedAt, progress, scrollY?,
-  annotations: Annotation[], isDraft
-}
+Book { id, title, author, content, format, coverColor, coverEmoji?, createdAt, updatedAt, progress, scrollY?, annotations: Annotation[], isDraft }
 Annotation { id, text, note?, start, end, color?, createdAt }
 ReaderPrefs { fontSize, lineHeight, paperMode, serif }
 ```
 
 ## Key Features
-1. **Library grid** with book covers (color + emoji), draft badge, reading progress bar.
-2. **Import** .txt / .md (and best-effort .epub) via DocumentPicker.
-3. **Create new book** modal with title, author, cover color palette.
-4. **Reader** with adjustable font size, line height, serif toggle, paper mode (light sepia), scroll-position persistence, Markdown-ish heading rendering.
-5. **Long-press paragraph → highlight** with optional note. Highlights list view + delete.
-6. **Editor** with floating toolbar: undo/redo, **B**/*i*, headings, bullet & numbered lists, blockquote, AI button.
-7. **AI Assistant drawer** with 4 modes (continue / improve / shorten / expand), accept-into-book action.
-8. **Settings**: persistent reading prefs + erase all data.
+1. Library grid with covers, drafts, progress bars, **edit-pencil overlay** (one-tap to editor), import button.
+2. Import .txt / .md / .epub via DocumentPicker.
+3. Reader: adjustable font size & line height, serif toggle, paper mode (sepia), scroll-position persistence, **edit** + **export** buttons in toolbar, long-press → highlight + optional note.
+4. Editor: title/author/content fields, floating toolbar (undo/redo, B, *i*, H, lists, quote, AI), meta sheet with cover color picker + **Export…** + **Preview**.
+5. **AI Assistant drawer** with 4 modes (continue / improve / shorten / expand).
+6. **Export to 5 formats** from both Reader and Editor.
+7. Settings: persistent reading prefs + erase all data.
 
-## How to run on Android
-1. Install **Expo Go** on the Android device from Play Store.
-2. Open the preview link or scan the QR code from the Emergent preview / Metro tunnel.
-3. The app will load directly inside Expo Go — fully offline-capable for reading & writing; AI requests go to the Emergent backend.
+## Distribution path
+Test in **Expo Go** via QR (instant). Build release APK with **EAS Build**:
+```bash
+eas build --platform android   # after Save-to-GitHub + clone locally
+```
 
-## Smart enhancement (revenue/utility hook)
-**AI writing modes as a soft paywall lane**: today all 4 modes (continue / improve / shorten / expand) are free. A trivial follow-up is to gate `expand` and `improve` behind a Pro tier — these are the modes power-users hit most when finishing a draft, giving a natural conversion moment without hurting the free reader experience.
+## Smart enhancement (revenue hook)
+**Tiered AI + premium export** — keep `continue` AI mode and TXT/MD export free; gate `expand`/`improve` AI modes and DOCX/PDF/EPUB export behind a Pro tier. These are the moments authors hit at the end of a project (export-to-publish, polish-with-AI) → highest conversion willingness.
 
 ## Status
-MVP complete. AI endpoint verified. UI loads on web preview & Android via Expo Go.
+- MVP complete & ANDROID-ready.
+- All 8 backend pytest pass (iteration_2.json).
+- Compiles cleanly, web preview renders for sanity, native exporter verified by static review.
+- Tested: AI 4 modes, library/editor/reader/settings/import flows, edit-overlay, 5-format export wiring.
