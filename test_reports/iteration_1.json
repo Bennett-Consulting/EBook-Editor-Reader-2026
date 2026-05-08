@@ -1,0 +1,50 @@
+{
+  "summary": "First-iteration full test of the local-only ebook reader & editor (Expo web). Verified backend AI proxy + frontend flows end-to-end on the public preview URL. Backend: 8/8 pytest cases pass (root health, all 4 AI modes return non-empty suggestions, session_id stickiness, empty/whitespace context => 400). Frontend (mobile viewport 390x844): Library tab shows YOUR LIBRARY eyebrow + 'Read. Write. Wander.' headline; bottom tabs (tab-library/tab-write/tab-settings) visible; seed book 'The Quiet Room' renders on first load; create-book-btn opens New Book modal; create-confirm-btn navigates to /editor/[id] and the new book shows up as a draft in the Write tab. Editor: title/author/content inputs, all 8 toolbar buttons (tb-bold, tb-italic, tb-heading, tb-bullet, tb-numlist, tb-quote, tb-undo, tb-redo) present; AI drawer opens, all 4 mode chips visible, 'continue' returned a real GPT-4o-mini suggestion, ai-accept inserted it into editor-content (12 -> ~57 words). Reader: paragraphs render, reader-settings sheet shows font-size & line-height counters + paper-mode toggle, long-press on para-0 opens highlight modal with note-input, save-highlight persists annotation and it appears in the reader-annotations sheet. Settings: font-size-row-plus & line-height-row-plus both increment; values persist in AsyncStorage (key '@ebook/prefs') and survive a full page reload (verified font went 18px -> 21px after 3 taps and stayed at 21px after reload); erase-btn visible.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Library",
+        "issues": [
+          "Long mobile-web warning noise in console: 'shadow*' style props deprecated and 'props.pointerEvents is deprecated' (cosmetic, from RN-web; can be silenced by migrating to boxShadow / style.pointerEvents)."
+        ]
+      }
+    ],
+    "react_native_issues": [
+      {
+        "component": "reader/[id].tsx reader-settings sheet",
+        "issue": "The Serif and Paper-mode buttons inside the in-reader settings sheet, plus the +/- counters inside that sheet, do not expose individual testIDs (only the parent reader-settings button does). Adding e.g. paper-mode-toggle / reader-fs-plus / reader-lh-plus testIDs would make these directly testable."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ai_endpoints.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional/polish) Add testIDs to in-reader settings sheet controls (paper-mode toggle, serif toggle, +/- counters) for parity with the Settings tab.",
+    "(Optional/polish) Migrate deprecated RN-web style props ('shadow*' -> boxShadow, props.pointerEvents -> style.pointerEvents) to silence console warnings.",
+    "(Optional) Align package versions to Expo-expected ones noted in expo logs: @react-native-async-storage/async-storage@2.2.0, expo-document-picker@~14.0.8, expo-file-system@~19.0.22."
+  ],
+  "critical_code_review_comments": [
+    "server.py: AI errors are caught and re-raised as 500 with raw exception text — fine for an internal preview, but in production you may want to redact the message to avoid leaking provider details.",
+    "AsyncStorage.clear() in settings.tsx wipes EVERY key (including @ebook/prefs and any future namespaced keys). Consider clearing only @ebook/* keys to stay scoped.",
+    "Library seed-book logic in (tabs)/index.tsx sets state synchronously to a single demo book and then calls saveBook; if the user navigates away before saveBook resolves, the seed could be lost. Low risk, but await saveBook before setBooks would be cleaner.",
+    "No file-size guard on importFile — pasting a huge .txt could freeze the JS thread on mobile."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (8/8)",
+    "frontend": "100% of requested flows (Library, create-book modal, editor inputs, all 8 toolbar testIDs, AI drawer with all 4 modes, ai-accept insertion, Write tab draft listing, reader long-press -> highlight -> annotations sheet, settings counters with reload persistence, erase-btn visible)"
+  },
+  "seed_data_creation": "Created one TEST_Book_Auto draft via the New Book modal during the editor flow, and one TEST_annotation_auto highlight on para-0 of the seeded 'The Quiet Room' book. Both live only in the Expo-web localStorage of the preview browser session and do not affect production data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 8 backend tests in /app/backend/tests/test_ai_endpoints.py passed against EXPO_PUBLIC_BACKEND_URL=https://text-craft-28.preview.emergentagent.com. The Expo web preview uses the AsyncStorage web shim which writes to window.localStorage with key '@ebook/prefs' (prefs) and '@ebook/books' (books) — useful when verifying persistence. Reader long-press is implemented via a custom 500ms onPressIn timer in reader/[id].tsx, so playwright must simulate it with mouse.down() + ~800ms wait + mouse.up() (page.click won't trigger it). All four AI modes return real GPT-4o-mini text and respect the supplied session_id.",
+  "rca_of_issue": "No outstanding bugs. One earlier false-negative during testing where a sniff of localStorage looked at wrong key '@reader_prefs_v1'; the actual key is '@ebook/prefs' and persistence is fully working (verified by reload — 21px font size persisted)."
+}

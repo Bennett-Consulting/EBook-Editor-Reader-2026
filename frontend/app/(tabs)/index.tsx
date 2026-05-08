@@ -1,0 +1,471 @@
+import React, { useCallback, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Dimensions,
+  RefreshControl,
+  Alert,
+  Modal,
+  TextInput,
+  ScrollView,
+  Platform,
+  KeyboardAvoidingView,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter, useFocusEffect } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system";
+import { coverPalette, sampleBookContent, theme } from "../../src/lib/theme";
+import { Book } from "../../src/lib/types";
+import { getBooks, saveBook, deleteBook } from "../../src/lib/storage";
+
+const { width } = Dimensions.get("window");
+const COL = 2;
+const GAP = 16;
+const CARD_W = (width - GAP * 3) / COL;
+const CARD_H = CARD_W * 1.45;
+
+function makeId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function sanitize(s: string) {
+  return s.replace(/<[^>]+>/g, "").replace(/\u0000/g, "").trim();
+}
+
+export default function LibraryScreen() {
+  const router = useRouter();
+  const [books, setBooks] = useState<Book[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newAuthor, setNewAuthor] = useState("");
+  const [newColor, setNewColor] = useState(coverPalette[0]);
+
+  const load = useCallback(async () => {
+    const list = await getBooks();
+    if (list.length === 0) {
+      // Seed with one demo book
+      const demo: Book = {
+        id: makeId(),
+        title: "The Quiet Room",
+        author: "M. Aren",
+        content: sampleBookContent,
+        format: "md",
+        coverColor: "#FFB000",
+        coverEmoji: "📖",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        progress: 0,
+        annotations: [],
+        isDraft: false,
+      };
+      setBooks([demo]);
+      await saveBook(demo);
+    } else {
+      setBooks(list);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
+
+  const importFile = async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: ["text/plain", "text/markdown", "application/epub+zip", "*/*"],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      const asset = res.assets[0];
+      const name = asset.name || "Untitled";
+      const lower = name.toLowerCase();
+      let format: Book["format"] = "txt";
+      if (lower.endsWith(".md") || lower.endsWith(".markdown")) format = "md";
+      else if (lower.endsWith(".epub")) format = "epub";
+
+      let content = "";
+      if (format === "epub") {
+        Alert.alert(
+          "EPUB import",
+          "EPUB files are compressed archives. The basic preview reads them as text. For best fidelity, please import .txt or .md files.",
+        );
+        try {
+          content = await FileSystem.readAsStringAsync(asset.uri);
+        } catch {
+          content = "Unable to read file content.";
+        }
+      } else {
+        try {
+          content = await FileSystem.readAsStringAsync(asset.uri);
+        } catch (e) {
+          // Web: fetch it
+          const r = await fetch(asset.uri);
+          content = await r.text();
+        }
+      }
+
+      content = sanitize(content);
+      if (!content) {
+        Alert.alert("Empty file", "This file appears to be empty.");
+        return;
+      }
+
+      const title = name.replace(/\.(txt|md|markdown|epub)$/i, "").slice(0, 80);
+      const book: Book = {
+        id: makeId(),
+        title: title || "Untitled",
+        author: "Imported",
+        content,
+        format,
+        coverColor: coverPalette[Math.floor(Math.random() * coverPalette.length)],
+        coverEmoji: format === "md" ? "📝" : format === "epub" ? "📚" : "📄",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        progress: 0,
+        annotations: [],
+        isDraft: false,
+      };
+      await saveBook(book);
+      await load();
+    } catch (e: any) {
+      Alert.alert("Import failed", e?.message ?? "Unknown error");
+    }
+  };
+
+  const createBook = async () => {
+    const t = newTitle.trim() || "Untitled";
+    const a = newAuthor.trim() || "Anonymous";
+    const book: Book = {
+      id: makeId(),
+      title: t,
+      author: a,
+      content: "",
+      format: "md",
+      coverColor: newColor,
+      coverEmoji: "✍️",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      progress: 0,
+      annotations: [],
+      isDraft: true,
+    };
+    await saveBook(book);
+    setCreateOpen(false);
+    setNewTitle("");
+    setNewAuthor("");
+    setNewColor(coverPalette[0]);
+    await load();
+    router.push(`/editor/${book.id}`);
+  };
+
+  const onLongPress = (b: Book) => {
+    Alert.alert(b.title, "Choose an action", [
+      { text: "Edit", onPress: () => router.push(`/editor/${b.id}`) },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          await deleteBook(b.id);
+          await load();
+        },
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
+  const renderItem = ({ item, index }: { item: Book; index: number }) => {
+    return (
+      <TouchableOpacity
+        testID={`book-card-${index}`}
+        activeOpacity={0.85}
+        onPress={() => router.push(`/reader/${item.id}`)}
+        onLongPress={() => onLongPress(item)}
+        style={[styles.card, { width: CARD_W }]}
+      >
+        <View style={[styles.cover, { backgroundColor: item.coverColor, height: CARD_H }]}>
+          <View style={styles.coverShine} />
+          <Text style={styles.coverEmoji}>{item.coverEmoji ?? "📘"}</Text>
+          <View style={styles.coverTitleWrap}>
+            <Text numberOfLines={3} style={styles.coverTitle}>
+              {item.title}
+            </Text>
+          </View>
+          {item.isDraft && (
+            <View style={styles.draftBadge}>
+              <Text style={styles.draftBadgeText}>DRAFT</Text>
+            </View>
+          )}
+        </View>
+        <Text numberOfLines={1} style={styles.bookTitle}>
+          {item.title}
+        </Text>
+        <Text numberOfLines={1} style={styles.bookAuthor}>
+          {item.author}
+        </Text>
+        <View style={styles.progressBar}>
+          <View
+            style={[
+              styles.progressFill,
+              { width: `${Math.max(2, Math.round((item.progress || 0) * 100))}%` },
+            ]}
+          />
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.eyebrow}>YOUR LIBRARY</Text>
+          <Text style={styles.h1}>Read. Write.{"\n"}Wander.</Text>
+        </View>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            testID="import-btn"
+            onPress={importFile}
+            style={styles.iconBtn}
+          >
+            <Ionicons name="cloud-upload-outline" size={22} color={theme.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            testID="create-book-btn"
+            onPress={() => setCreateOpen(true)}
+            style={[styles.iconBtn, styles.iconBtnPrimary]}
+          >
+            <Ionicons name="add" size={24} color="#0A0A0B" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <FlatList
+        testID="library-grid"
+        data={books}
+        keyExtractor={(b) => b.id}
+        renderItem={renderItem}
+        numColumns={COL}
+        columnWrapperStyle={{ gap: GAP, paddingHorizontal: GAP }}
+        contentContainerStyle={{ gap: GAP, paddingTop: 8, paddingBottom: 120 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.brand}
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>Your library is empty</Text>
+            <Text style={styles.emptySub}>Import a .txt or .md, or write something new.</Text>
+          </View>
+        }
+      />
+
+      <Modal
+        visible={createOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCreateOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.modalBackdrop}
+        >
+          <View style={styles.modalSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>New Book</Text>
+            <Text style={styles.label}>Title</Text>
+            <TextInput
+              testID="new-title-input"
+              value={newTitle}
+              onChangeText={setNewTitle}
+              placeholder="A working title…"
+              placeholderTextColor={theme.textTertiary}
+              style={styles.input}
+            />
+            <Text style={styles.label}>Author</Text>
+            <TextInput
+              testID="new-author-input"
+              value={newAuthor}
+              onChangeText={setNewAuthor}
+              placeholder="Your name"
+              placeholderTextColor={theme.textTertiary}
+              style={styles.input}
+            />
+            <Text style={styles.label}>Cover color</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+              {coverPalette.map((c) => (
+                <TouchableOpacity
+                  key={c}
+                  onPress={() => setNewColor(c)}
+                  style={[
+                    styles.swatch,
+                    { backgroundColor: c, borderColor: newColor === c ? theme.brand : "transparent" },
+                  ]}
+                />
+              ))}
+            </ScrollView>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              <TouchableOpacity
+                onPress={() => setCreateOpen(false)}
+                style={[styles.btn, styles.btnGhost, { flex: 1 }]}
+              >
+                <Text style={styles.btnGhostText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="create-confirm-btn"
+                onPress={createBook}
+                style={[styles.btn, styles.btnPrimary, { flex: 1 }]}
+              >
+                <Text style={styles.btnPrimaryText}>Start writing</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.bg },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 20,
+  },
+  eyebrow: {
+    color: theme.brand,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 3,
+    marginBottom: 8,
+  },
+  h1: { color: theme.textPrimary, fontSize: 34, fontWeight: "300", lineHeight: 38 },
+  headerActions: { flexDirection: "row", gap: 10 },
+  iconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconBtnPrimary: { backgroundColor: theme.brand, borderColor: theme.brand },
+
+  card: {},
+  cover: {
+    borderRadius: 14,
+    padding: 14,
+    overflow: "hidden",
+    justifyContent: "space-between",
+  },
+  coverShine: {
+    position: "absolute",
+    top: -20,
+    left: -10,
+    width: 90,
+    height: 90,
+    borderRadius: 50,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    opacity: 0.7,
+  },
+  coverEmoji: { fontSize: 28 },
+  coverTitleWrap: { marginTop: "auto" },
+  coverTitle: {
+    color: "#0A0A0B",
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+  },
+  draftBadge: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  draftBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800", letterSpacing: 1.2 },
+
+  bookTitle: { color: theme.textPrimary, marginTop: 10, fontSize: 14, fontWeight: "600" },
+  bookAuthor: { color: theme.textSecondary, fontSize: 12, marginTop: 2 },
+  progressBar: {
+    height: 3,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderRadius: 2,
+    marginTop: 8,
+    overflow: "hidden",
+  },
+  progressFill: { height: "100%", backgroundColor: theme.brand, borderRadius: 2 },
+
+  empty: { alignItems: "center", justifyContent: "center", paddingVertical: 80, paddingHorizontal: 24 },
+  emptyTitle: { color: theme.textPrimary, fontSize: 18, fontWeight: "600", marginBottom: 6 },
+  emptySub: { color: theme.textSecondary, fontSize: 14, textAlign: "center" },
+
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  modalSheet: {
+    backgroundColor: theme.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 30,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 38,
+    height: 4,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderRadius: 2,
+    marginBottom: 14,
+  },
+  sheetTitle: { color: theme.textPrimary, fontSize: 22, fontWeight: "600", marginBottom: 16 },
+  label: { color: theme.textSecondary, fontSize: 12, fontWeight: "700", letterSpacing: 1.5, marginBottom: 6 },
+  input: {
+    backgroundColor: theme.surfaceHi,
+    color: theme.textPrimary,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    marginBottom: 16,
+  },
+  swatch: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 10,
+    borderWidth: 2,
+  },
+  btn: { paddingVertical: 14, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  btnPrimary: { backgroundColor: theme.brand },
+  btnPrimaryText: { color: "#0A0A0B", fontWeight: "700", fontSize: 15 },
+  btnGhost: { backgroundColor: theme.surfaceHi, borderWidth: 1, borderColor: theme.border },
+  btnGhostText: { color: theme.textPrimary, fontWeight: "600", fontSize: 15 },
+});
