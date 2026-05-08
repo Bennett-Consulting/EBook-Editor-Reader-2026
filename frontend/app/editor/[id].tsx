@@ -664,4 +664,6 @@ const styles = StyleSheet.create({
   btnPrimaryText: { color: "#0A0A0B", fontWeight: "700", fontSize: 15 },
   btnGhost: { backgroundColor: theme.surfaceHi, borderWidth: 1, borderColor: theme.border },
   btnGhostText: { color: theme.textPrimary, fontWeight: "600", fontSize: 15 },
+  btnDanger: { backgroundColor: "rgba(255,107,107,0.10)", borderWidth: 1, borderColor: "rgba(255,107,107,0.35)" },
+  btnDangerText: { color: "#ff6b6b", fontWeight: "600", fontSize: 15 },
 });
