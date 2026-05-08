@@ -1,0 +1,100 @@
+{
+  "theme_and_archetype": {
+    "theme": "Dark",
+    "archetype": "Archetype 5 (Jewel & Luxury) with a warm reading twist",
+    "description": "An immersive, cinematic, and moody dark-first mobile web experience that feels premium and focused. It uses deep obsidian backgrounds combined with Warm Amber to give a 'paper' feel to an otherwise digital environment."
+  },
+  "colors": {
+    "background": {
+      "base": "#0A0A0B",
+      "surface": "#141416",
+      "surfaceHover": "#1C1C1E"
+    },
+    "text": {
+      "primary": "#F5F5F6",
+      "secondary": "#A0A0A5",
+      "tertiary": "#606065",
+      "readingText": "#E6E4DF"
+    },
+    "brand": {
+      "primary": "#FFB000",
+      "primaryHover": "#E59E00",
+      "highlight": "rgba(255, 176, 0, 0.25)"
+    },
+    "borders": {
+      "default": "rgba(255, 255, 255, 0.08)",
+      "active": "rgba(255, 176, 0, 0.4)"
+    }
+  },
+  "typography": {
+    "primaryFont": "Manrope",
+    "readingFont": "Spectral",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl font-light tracking-tight text-[#F5F5F6] font-sans",
+      "h2": "text-2xl sm:text-3xl font-medium tracking-tight text-[#F5F5F6] font-sans",
+      "h3": "text-xl sm:text-2xl font-medium text-[#F5F5F6] font-sans",
+      "body": "text-base leading-relaxed text-[#A0A0A5] font-sans",
+      "readingBody": "text-lg sm:text-xl leading-[1.8] text-[#E6E4DF] font-serif",
+      "overline": "text-xs font-bold uppercase tracking-[0.2em] text-[#FFB000]"
+    }
+  },
+  "layouts": {
+    "appContainer": "min-h-screen bg-[#0A0A0B] text-[#F5F5F6] flex flex-col selection:bg-[#FFB000]/30",
+    "libraryGrid": "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 p-6",
+    "readerContainer": "flex-1 overflow-y-auto px-6 py-12 md:px-12 max-w-2xl mx-auto w-full",
+    "bottomNav": "fixed bottom-0 w-full h-20 backdrop-blur-2xl bg-[#0A0A0B]/80 border-t border-white/5 flex justify-around items-center px-4 pb-safe z-50",
+    "topToolbar": "fixed top-0 w-full h-16 backdrop-blur-xl bg-[#0A0A0B]/80 border-b border-white/5 flex justify-between items-center px-4 pt-safe z-50"
+  },
+  "components": {
+    "bookCard": "relative group rounded-2xl overflow-hidden bg-[#141416] border border-white/5 transition-all duration-300 hover:-translate-y-1 hover:border-white/20 hover:shadow-2xl shadow-black/50 cursor-pointer",
+    "progressBar": "h-1 w-full bg-white/10 rounded-full overflow-hidden mt-3",
+    "progressFill": "h-full bg-[#FFB000] rounded-full",
+    "aiAssistantDrawer": "fixed inset-x-0 bottom-0 bg-[#141416] border-t border-white/10 rounded-t-3xl p-6 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] z-[60] transform transition-transform duration-300",
+    "editorToolbar": "fixed bottom-24 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-[#1C1C1E]/90 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 shadow-2xl z-40",
+    "buttons": {
+      "primary": "bg-[#FFB000] text-black font-semibold px-6 py-3 rounded-xl hover:bg-[#E59E00] transition-colors flex items-center justify-center gap-2 cursor-pointer",
+      "secondary": "bg-white/5 text-white font-medium px-6 py-3 rounded-xl hover:bg-white/10 transition-colors border border-white/10 flex items-center justify-center gap-2 cursor-pointer",
+      "icon": "p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-[#FFB000] transition-colors cursor-pointer"
+    }
+  },
+  "motion": {
+    "pageTurn": "transition-transform duration-300 ease-[cubic-bezier(0.33,1,0.68,1)]",
+    "fadeUi": "transition-opacity duration-200 ease-in-out",
+    "drawerSlide": "transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1590482847283-80e1551efe0f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzl8MHwxfHNlYXJjaHw0fHxtaW5pbWFsaXN0JTIwYm9vayUyMGNvdmVyJTIwYWJzdHJhY3R8ZW58MHx8fHwxNzc4MjQwOTQ2fDA&ixlib=rb-4.1.0&q=85",
+        "description": "white and red heart print paper on white textile",
+        "category": "book_cover_1"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1538981457319-5e459479f9d0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzl8MHwxfHNlYXJjaHwyfHxtaW5pbWFsaXN0JTIwYm9vayUyMGNvdmVyJTIwYWJzdHJhY3R8ZW58MHx8fHwxNzc4MjQwOTQ2fDA&ixlib=rb-4.1.0&q=85",
+        "description": "white printer paper abstract cover",
+        "category": "book_cover_2"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1759753818554-728697fdd5bf?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzl8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwYm9vayUyMGNvdmVyJTIwYWJzdHJhY3R8ZW58MHx8fHwxNzc4MjQwOTQ2fDA&ixlib=rb-4.1.0&q=85",
+        "description": "A light blue notebook cover",
+        "category": "book_cover_3"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1718670013927-58fc3333310b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzl8MHwxfHNlYXJjaHwzfHxtaW5pbWFsaXN0JTIwYm9vayUyMGNvdmVyJTIwYWJzdHJhY3R8ZW58MHx8fHwxNzc4MjQwOTQ2fDA&ixlib=rb-4.1.0&q=85",
+        "description": "A black and white abstract cover",
+        "category": "book_cover_4"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Install Google Fonts 'Manrope' (for UI) and 'Spectral' (for reading view).",
+    "Install lucide-react or @phosphor-icons/react for icons. Phosphor is preferred for its high-end duotone feel.",
+    "The Library screen should have a grid of book covers using the provided image URLs.",
+    "For the Reader Screen, use Spectral font with high line-height (`leading-[1.8]`), text size `text-lg` to `text-xl`, and color `#E6E4DF`. Implement a 'Paper Mode' toggle that switches the background to an off-white/sepia (`bg-[#F4F1EA]`) and text to dark gray (`text-[#2A2A2A]`).",
+    "The Editor Screen must have a floating toolbar at the bottom for rich text formatting. Avoid bulky fixed headers.",
+    "The AI Assistant panel should be an overlay drawer sliding up from the bottom when invoked in the Editor.",
+    "The Bottom Tab Navigation must use a heavy glassmorphism effect (`backdrop-blur-2xl`) and stay fixed at the bottom.",
+    "All interactive elements MUST have a `data-testid` attribute (e.g., `data-testid=\"library-tab-button\"`).",
+    "Do not use default Shadcn cards for everything; use the custom `bookCard` styles for the library."
+  ]
+}
