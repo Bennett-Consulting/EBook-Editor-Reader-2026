@@ -1,27 +1,58 @@
+"""
+Ebook Reader & Editor — Backend API
+
+Standalone backend using direct OpenAI API calls and SQLite.
+No external platform dependencies (Emergent, MongoDB, etc.).
+"""
 from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import uuid
+import sqlite3
 from pathlib import Path
+from contextlib import contextmanager
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
-
+import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# --- Database (SQLite — local, zero-config) ---
+DB_PATH = ROOT_DIR / "ebook.db"
 
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
+
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS status_checks (
+                id TEXT PRIMARY KEY,
+                client_name TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            )
+        """)
+
+
+init_db()
+
+
+@contextmanager
+def get_db():
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# --- OpenAI config ---
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -58,14 +89,21 @@ async def root():
 @api_router.post("/status", response_model=StatusCheck)
 async def create_status_check(input: StatusCheckCreate):
     status_obj = StatusCheck(**input.dict())
-    await db.status_checks.insert_one(status_obj.dict())
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO status_checks (id, client_name, timestamp) VALUES (?, ?, ?)",
+            (status_obj.id, status_obj.client_name, status_obj.timestamp.isoformat()),
+        )
     return status_obj
 
 
 @api_router.get("/status", response_model=List[StatusCheck])
 async def get_status_checks():
-    rows = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    return [StatusCheck(**row) for row in rows]
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, client_name, timestamp FROM status_checks ORDER BY timestamp DESC LIMIT 1000"
+        ).fetchall()
+    return [StatusCheck(id=r["id"], client_name=r["client_name"], timestamp=r["timestamp"]) for r in rows]
 
 
 def _system_prompt(mode: str) -> str:
@@ -88,8 +126,8 @@ def _system_prompt(mode: str) -> str:
 
 @api_router.post("/ai/suggest", response_model=AISuggestResponse)
 async def ai_suggest(req: AISuggestRequest):
-    if not EMERGENT_LLM_KEY:
-        raise HTTPException(status_code=500, detail="EMERGENT_LLM_KEY not configured")
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
 
     if not req.context or not req.context.strip():
         raise HTTPException(status_code=400, detail="context is required")
@@ -97,21 +135,38 @@ async def ai_suggest(req: AISuggestRequest):
     session_id = req.session_id or str(uuid.uuid4())
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message=_system_prompt(req.mode),
-        ).with_model("openai", "gpt-4o-mini")
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": _system_prompt(req.mode)},
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Mode: {req.mode}\n\n"
+                                f"---\n{req.context}\n---\n\n"
+                                "Output only the resulting text."
+                            ),
+                        },
+                    ],
+                    "max_tokens": 1000,
+                    "temperature": 0.7,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            suggestion = data["choices"][0]["message"]["content"].strip()
 
-        prompt_text = (
-            f"Mode: {req.mode}\n\n"
-            f"---\n{req.context}\n---\n\n"
-            "Output only the resulting text."
-        )
-        user_message = UserMessage(text=prompt_text)
-        response = await chat.send_message(user_message)
-        suggestion = (response or "").strip()
         return AISuggestResponse(suggestion=suggestion, session_id=session_id)
+    except httpx.HTTPStatusError as e:
+        logging.exception("OpenAI API error")
+        raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.response.status_code}")
     except Exception as e:
         logging.exception("AI suggest failed")
         raise HTTPException(status_code=500, detail=f"AI error: {e}")
@@ -132,8 +187,3 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
