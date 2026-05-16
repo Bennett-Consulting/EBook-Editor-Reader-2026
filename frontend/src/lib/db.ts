@@ -52,7 +52,7 @@ export async function initDatabase(db: SQLiteDatabase): Promise<void> {
         title         TEXT,
         timestamp     INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_chunks_doc
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_doc
         ON document_chunks(document_id, chunk_index);
 
       CREATE TABLE IF NOT EXISTS annotations (
@@ -262,6 +262,40 @@ export const chunksDao = {
     await db.runAsync(
       "DELETE FROM document_chunks WHERE document_id = ? AND chunk_index >= ?",
       [documentId, fromIndex]
+    );
+  },
+
+  /**
+   * Delete a single chunk by document + index.
+   * Used by mergeWithPreviousPage() to remove the merged page.
+   *
+   * Android equivalent: DocumentChunksDao @Query("DELETE ... WHERE index = ?")
+   */
+  async deleteChunk(
+    db: SQLiteDatabase,
+    documentId: string,
+    index: number
+  ): Promise<void> {
+    await db.runAsync(
+      "DELETE FROM document_chunks WHERE document_id = ? AND chunk_index = ?",
+      [documentId, index]
+    );
+  },
+
+  /**
+   * Shift all chunk indices down by 1 for chunks after a given index.
+   * Used after deleting a chunk to keep indices sequential.
+   *
+   * Android equivalent: DocumentChunksDao @Query("UPDATE ... SET index = index - 1 WHERE index > ?")
+   */
+  async shiftIndicesDown(
+    db: SQLiteDatabase,
+    documentId: string,
+    afterIndex: number
+  ): Promise<void> {
+    await db.runAsync(
+      "UPDATE document_chunks SET chunk_index = chunk_index - 1 WHERE document_id = ? AND chunk_index > ?",
+      [documentId, afterIndex]
     );
   },
 
