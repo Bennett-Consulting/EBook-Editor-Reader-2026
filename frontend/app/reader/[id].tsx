@@ -49,6 +49,7 @@ export default function ReaderScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const contentHeightRef = useRef(0);
   const layoutHeightRef = useRef(1);
+  const scrollSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -85,10 +86,13 @@ export default function ReaderScreen() {
   const sub = paperMode ? "#5a554b" : theme.textSecondary;
 
   const persistScroll = (y: number) => {
-    contentHeightRef.current = contentHeightRef.current || 1;
-    const total = Math.max(1, contentHeightRef.current - layoutHeightRef.current);
-    const progress = Math.min(1, Math.max(0, y / total));
-    saveBook({ ...book, scrollY: y, progress });
+    if (scrollSaveTimer.current) clearTimeout(scrollSaveTimer.current);
+    scrollSaveTimer.current = setTimeout(() => {
+      contentHeightRef.current = contentHeightRef.current || 1;
+      const total = Math.max(1, contentHeightRef.current - layoutHeightRef.current);
+      const progress = Math.min(1, Math.max(0, y / total));
+      saveBook({ ...book, scrollY: y, progress });
+    }, 1000);
   };
 
   const updatePrefs = async (next: ReaderPrefs) => {
