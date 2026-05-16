@@ -1,3 +1,43 @@
+// ─── AI Provider Types ──────────────────────────────────────────────────────
+
+export type AIProvider =
+  | "openai"
+  | "google"
+  | "anthropic"
+  | "groq"
+  | "ollama"
+  | "custom";
+
+export interface AIProviderConfig {
+  name: string;
+  baseUrl: string;
+  modelsEndpoint: string;
+  chatEndpoint: string;
+  authHeader: (key: string) => Record<string, string>;
+  icon: string;
+  keyPlaceholder: string;
+}
+
+export interface AIModel {
+  id: string;
+  name: string;
+  provider: AIProvider;
+  tier: "flash" | "standard" | "pro" | "flagship";
+}
+
+export interface SavedAIKey {
+  id: string;
+  provider: AIProvider;
+  apiKey: string;           // stored locally only
+  label: string;            // user-facing name ("My OpenAI Key")
+  customBaseUrl?: string;   // for custom/ollama providers
+  addedAt: string;
+  lastValidated?: string;
+  modelCount?: number;      // how many models were discovered
+}
+
+// ─── Book Types ─────────────────────────────────────────────────────────────
+
 export type BookFormat = "txt" | "md" | "epub";
 
 export interface Annotation {
