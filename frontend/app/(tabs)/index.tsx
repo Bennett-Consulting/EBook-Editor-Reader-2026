@@ -115,15 +115,22 @@ export default function LibraryScreen() {
       else if (lower.endsWith(".epub")) format = "epub";
 
       let content = "";
+      let bookTitle = name.replace(/\.(txt|md|markdown|epub)$/i, "").slice(0, 80) || "Untitled";
+      let bookAuthor = "Imported";
+
       if (format === "epub") {
-        Alert.alert(
-          "EPUB import",
-          "EPUB files are compressed archives. The basic preview reads them as text. For best fidelity, please import .txt or .md files.",
-        );
         try {
-          content = await FileSystem.readAsStringAsync(asset.uri);
-        } catch {
-          content = "Unable to read file content.";
+          const { parseEpub } = await import("../../src/lib/epubParser");
+          const parsed = await parseEpub(asset.uri);
+          content = parsed.content;
+          bookTitle = parsed.title || bookTitle;
+          bookAuthor = parsed.author || bookAuthor;
+        } catch (e: any) {
+          Alert.alert(
+            "EPUB Import Error",
+            e?.message || "Could not parse this EPUB file. Try importing as .txt or .md.",
+          );
+          return;
         }
       } else {
         try {
@@ -141,11 +148,10 @@ export default function LibraryScreen() {
         return;
       }
 
-      const title = name.replace(/\.(txt|md|markdown|epub)$/i, "").slice(0, 80);
       const book: Book = {
         id: makeId(),
-        title: title || "Untitled",
-        author: "Imported",
+        title: bookTitle,
+        author: bookAuthor,
         content,
         format,
         coverColor: coverPalette[Math.floor(Math.random() * coverPalette.length)],

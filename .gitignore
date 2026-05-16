@@ -80,3 +80,18 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/
+
+# Metro bundler cache
+.metro-cache/
+frontend/.metro-cache/
+
+# Expo
+.expo/
+frontend/.expo/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+frontend/.env
+backend/.env

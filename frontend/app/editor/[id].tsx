@@ -235,6 +235,8 @@ export default function EditorScreen() {
             placeholderTextColor={theme.textTertiary}
             style={styles.titleInput}
             multiline
+            spellCheck={true}
+            autoCapitalize="sentences"
           />
           <TextInput
             testID="editor-author"
@@ -256,6 +258,8 @@ export default function EditorScreen() {
             style={styles.contentInput}
             multiline
             textAlignVertical="top"
+            spellCheck={true}
+            autoCapitalize="sentences"
           />
         </ScrollView>
 
