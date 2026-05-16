@@ -1,3 +1,68 @@
+// ─── Database Entity Types (SQLite — mirrors Android Room schema) ────────────
+
+/**
+ * A single page of a document. Documents are split into chunks during
+ * pagination, and the reader/editor works with one chunk at a time.
+ *
+ * Android equivalent: DocumentChunkEntity (AppDatabase)
+ */
+export interface DocumentChunk {
+  id?: number;              // auto-increment PK
+  documentId: string;       // which book this belongs to
+  chunkIndex: number;       // sequential page number (0-based)
+  rawContent: string;       // original imported text
+  cleanContent: string;     // sanitized / edited text (displayed)
+  mappingJson?: string;     // raw→clean character mapping (for highlights)
+  title?: string | null;    // chapter title (non-null = chapter start)
+  timestamp: number;        // last modified (epoch ms)
+}
+
+/**
+ * A highlight or note attached to a specific position in a chunk.
+ *
+ * Android equivalent: AnnotationEntity (Build 7.3.0 chunk-based)
+ */
+export interface AnnotationEntry {
+  id: string;
+  documentId: string;
+  chunkIndex: number;
+  offset: number;           // char offset within chunk
+  length: number;           // selection length
+  note?: string | null;
+  timestamp: number;
+}
+
+/**
+ * Every AI or manual edit, tracked for undo and audit trail.
+ * Stores the before/after text and the AI's rationale.
+ *
+ * Android equivalent: EditHistoryEntity
+ */
+export interface EditHistoryEntry {
+  id: string;
+  documentId: string;
+  chunkIndex: number;
+  originalText: string;
+  updatedText: string;
+  rationale?: string | null;
+  timestamp: number;
+}
+
+/**
+ * Voice command transcript and the AI's suggested edit.
+ *
+ * Android equivalent: VoiceNoteEntity
+ */
+export interface VoiceNoteEntry {
+  id: string;
+  documentId: string;
+  chunkIndex: number;
+  transcript: string;
+  aiSuggestion?: string | null;
+  isApplied: boolean;
+  timestamp: number;
+}
+
 // ─── AI Provider Types ──────────────────────────────────────────────────────
 
 export type AIProvider =
