@@ -20,9 +20,36 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { theme, coverPalette } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
 import { getBook, saveBook, deleteBook } from "../../src/lib/storage";
-import { aiSuggest, AIMode } from "../../src/lib/ai";
+import { aiSuggest, aiVoiceEdit, AIMode, AIVoiceStyle } from "../../src/lib/ai";
 import { confirmAction } from "../../src/lib/dialogs";
 import ExportSheet from "../../src/components/ExportSheet";
+
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+const AI_ASSIST_MODES: AIMode[] = ["continue", "improve", "shorten", "expand"];
+
+const VOICE_STYLES: { key: AIVoiceStyle; label: string; icon: string; desc: string }[] = [
+  {
+    key: "casual",
+    label: "Casual",
+    icon: "☕",
+    desc: "Warm, conversational — like telling a friend over coffee",
+  },
+  {
+    key: "professional",
+    label: "Professional",
+    icon: "📋",
+    desc: "Polished, authoritative — publication-quality prose",
+  },
+  {
+    key: "theatrical",
+    label: "Theatrical",
+    icon: "🎭",
+    desc: "Full stage script — dialogue, directions, drama",
+  },
+];
+
+// ─── Editor Screen ──────────────────────────────────────────────────────────
 
 export default function EditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -34,11 +61,19 @@ export default function EditorScreen() {
   const [content, setContent] = useState("");
   const [coverColor, setCoverColor] = useState(coverPalette[0]);
 
+  // AI Assist state
   const [showAI, setShowAI] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState("");
   const [aiMode, setAiMode] = useState<AIMode>("continue");
   const [aiModelInfo, setAiModelInfo] = useState("");
+
+  // Voice Edit state
+  const [showVoiceEdit, setShowVoiceEdit] = useState(false);
+  const [voiceLoading, setVoiceLoading] = useState(false);
+  const [voiceResult, setVoiceResult] = useState("");
+  const [voiceStyle, setVoiceStyle] = useState<AIVoiceStyle>("casual");
+  const [voiceModelInfo, setVoiceModelInfo] = useState("");
 
   const [showMeta, setShowMeta] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -162,6 +197,8 @@ export default function EditorScreen() {
     setContent(content.slice(0, lineStart) + "> " + content.slice(lineStart));
   };
 
+  // ─── AI Assist ──────────────────────────────────────────────────────────
+
   const askAI = async (mode: AIMode) => {
     if (!content.trim()) {
       Alert.alert("Nothing to work with", "Write at least a sentence first.");
@@ -191,6 +228,51 @@ export default function EditorScreen() {
     const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n\n";
     setContent(content + sep + aiSuggestion);
     setShowAI(false);
+  };
+
+  // ─── Voice Edit ─────────────────────────────────────────────────────────
+
+  const runVoiceEdit = async (style: AIVoiceStyle) => {
+    if (!content.trim()) {
+      Alert.alert("Nothing to rewrite", "Write some text first, then choose a voice style.");
+      return;
+    }
+    Keyboard.dismiss();
+    setShowVoiceEdit(true);
+    setVoiceStyle(style);
+    setVoiceLoading(true);
+    setVoiceResult("");
+    setVoiceModelInfo("");
+    try {
+      // Voice edit processes the full content (up to a reasonable limit).
+      // Theatrical especially needs the whole chapter for a complete script.
+      const maxInput = style === "theatrical" ? 8000 : 4000;
+      const inputText =
+        content.length > maxInput ? content.slice(0, maxInput) : content;
+
+      const res = await aiVoiceEdit(inputText, style, book?.id);
+      setVoiceResult(res.suggestion);
+      setVoiceModelInfo(`${res.provider} · ${res.model}`);
+    } catch (e: any) {
+      setVoiceResult(`Voice edit failed.\n${e?.message ?? ""}`);
+    } finally {
+      setVoiceLoading(false);
+    }
+  };
+
+  const acceptVoiceEdit = () => {
+    if (!voiceResult) return;
+    pushHistory(content);
+    setContent(voiceResult);
+    setShowVoiceEdit(false);
+  };
+
+  const appendVoiceEdit = () => {
+    if (!voiceResult) return;
+    pushHistory(content);
+    const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n\n";
+    setContent(content + sep + "---\n\n" + voiceResult);
+    setShowVoiceEdit(false);
   };
 
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
@@ -287,26 +369,36 @@ export default function EditorScreen() {
               <Ionicons name="sparkles" size={16} color="#0A0A0B" />
               <Text style={styles.aiBtnText}>AI</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              testID="voice-edit-btn"
+              onPress={() => {
+                Keyboard.dismiss();
+                setShowVoiceEdit(true);
+              }}
+              style={styles.voiceEditBtn}
+            >
+              <Text style={styles.voiceEditBtnText}>🎭</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </KeyboardAvoidingView>
 
-      {/* AI Drawer */}
+      {/* ═══════════════════════════════════════════════════════════════════
+          AI ASSIST DRAWER
+          ═══════════════════════════════════════════════════════════════════ */}
       <Modal visible={showAI} transparent animationType="slide" onRequestClose={() => setShowAI(false)}>
         <Pressable style={styles.backdrop} onPress={() => setShowAI(false)}>
           <Pressable style={styles.aiSheet}>
             <View style={styles.handle} />
             <View style={styles.aiHeader}>
               <Ionicons name="sparkles" size={18} color={theme.brand} />
-              <Text style={styles.aiTitle}>AI assistant</Text>
+              <Text style={styles.aiTitle}>AI Assist</Text>
               {aiModelInfo ? (
-                <Text style={{ color: theme.textTertiary, fontSize: 11, fontFamily: "monospace" }}>
-                  {aiModelInfo}
-                </Text>
+                <Text style={styles.modelBadge}>{aiModelInfo}</Text>
               ) : null}
             </View>
             <View style={styles.aiModes}>
-              {(["continue", "improve", "shorten", "expand"] as AIMode[]).map((m) => (
+              {AI_ASSIST_MODES.map((m) => (
                 <TouchableOpacity
                   key={m}
                   testID={`ai-mode-${m}`}
@@ -363,6 +455,120 @@ export default function EditorScreen() {
                 <Text style={styles.btnPrimaryText}>Insert into book</Text>
               </TouchableOpacity>
             </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          VOICE EDIT DRAWER
+          ═══════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={showVoiceEdit}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowVoiceEdit(false)}
+      >
+        <Pressable style={styles.backdrop} onPress={() => setShowVoiceEdit(false)}>
+          <Pressable style={styles.voiceSheet}>
+            <View style={styles.handle} />
+
+            {/* Header */}
+            <View style={styles.aiHeader}>
+              <Text style={{ fontSize: 18 }}>🎭</Text>
+              <Text style={styles.aiTitle}>Voice Edit</Text>
+              {voiceModelInfo ? (
+                <Text style={styles.modelBadge}>{voiceModelInfo}</Text>
+              ) : null}
+            </View>
+            <Text style={styles.voiceSubtitle}>
+              Rewrite your text in a different voice. Undo any time.
+            </Text>
+
+            {/* Style Selector */}
+            <View style={styles.voiceStyleGrid}>
+              {VOICE_STYLES.map((vs) => (
+                <TouchableOpacity
+                  key={vs.key}
+                  testID={`voice-${vs.key}`}
+                  onPress={() => runVoiceEdit(vs.key)}
+                  style={[
+                    styles.voiceCard,
+                    voiceStyle === vs.key &&
+                      voiceLoading && {
+                        borderColor: theme.brand,
+                        backgroundColor: "rgba(255,213,0,0.08)",
+                      },
+                  ]}
+                  disabled={voiceLoading}
+                >
+                  <Text style={styles.voiceCardIcon}>{vs.icon}</Text>
+                  <Text style={styles.voiceCardLabel}>{vs.label}</Text>
+                  <Text style={styles.voiceCardDesc}>{vs.desc}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Result */}
+            {(voiceLoading || voiceResult) ? (
+              <ScrollView style={styles.voiceResultBox}>
+                {voiceLoading ? (
+                  <View style={{ alignItems: "center", paddingVertical: 28 }}>
+                    <ActivityIndicator color={theme.brand} />
+                    <Text style={{ color: theme.textSecondary, marginTop: 12 }}>
+                      {voiceStyle === "theatrical"
+                        ? "🎭 Writing the production…"
+                        : `Rewriting in ${voiceStyle} voice…`}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.aiText} selectable>
+                    {voiceResult}
+                  </Text>
+                )}
+              </ScrollView>
+            ) : null}
+
+            {/* Actions */}
+            {voiceResult && !voiceLoading ? (
+              <View style={{ gap: 8 }}>
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <TouchableOpacity
+                    testID="voice-close"
+                    onPress={() => setShowVoiceEdit(false)}
+                    style={[styles.btn, styles.btnGhost, { flex: 1 }]}
+                  >
+                    <Text style={styles.btnGhostText}>Close</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    testID="voice-replace"
+                    onPress={acceptVoiceEdit}
+                    style={[styles.btn, styles.btnPrimary, { flex: 1 }]}
+                  >
+                    <Text style={styles.btnPrimaryText}>
+                      {voiceStyle === "theatrical" ? "Replace with script" : "Replace text"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {voiceStyle === "theatrical" ? (
+                  <TouchableOpacity
+                    testID="voice-append"
+                    onPress={appendVoiceEdit}
+                    style={[styles.btn, styles.btnGhost]}
+                  >
+                    <Text style={styles.btnGhostText}>
+                      Append script below original
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : !voiceLoading ? (
+              <TouchableOpacity
+                onPress={() => setShowVoiceEdit(false)}
+                style={[styles.btn, styles.btnGhost]}
+              >
+                <Text style={styles.btnGhostText}>Close</Text>
+              </TouchableOpacity>
+            ) : null}
           </Pressable>
         </Pressable>
       </Modal>
@@ -447,6 +653,8 @@ export default function EditorScreen() {
   );
 }
 
+// ─── Tool Buttons ───────────────────────────────────────────────────────────
+
 function ToolBtn({
   icon,
   onPress,
@@ -499,6 +707,8 @@ function ToolText({
   );
 }
 
+// ─── Styles ─────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
   topbar: {
@@ -545,6 +755,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.select({ ios: "Georgia", default: "serif" }),
   },
 
+  // ── Floating Toolbar ──────────────────────────────────────────────────
   toolbar: {
     position: "absolute",
     bottom: 16,
@@ -591,7 +802,20 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   aiBtnText: { color: "#0A0A0B", fontWeight: "800", fontSize: 13 },
+  voiceEditBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    marginLeft: 2,
+  },
+  voiceEditBtnText: { fontSize: 16 },
 
+  // ── Shared sheet styles ───────────────────────────────────────────────
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   aiSheet: {
     backgroundColor: theme.surface,
@@ -613,6 +837,11 @@ const styles = StyleSheet.create({
   },
   aiHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 },
   aiTitle: { color: theme.textPrimary, fontSize: 18, fontWeight: "600" },
+  modelBadge: {
+    color: theme.textTertiary,
+    fontSize: 11,
+    fontFamily: "monospace",
+  },
   aiModes: { flexDirection: "row", gap: 8, marginBottom: 14, flexWrap: "wrap" },
   aiChip: {
     paddingHorizontal: 14,
@@ -634,6 +863,62 @@ const styles = StyleSheet.create({
   },
   aiText: { color: theme.textPrimary, fontSize: 15, lineHeight: 22 },
 
+  // ── Voice Edit sheet ──────────────────────────────────────────────────
+  voiceSheet: {
+    backgroundColor: theme.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 30,
+    borderWidth: 1,
+    borderColor: theme.border,
+    maxHeight: "92%",
+  },
+  voiceSubtitle: {
+    color: theme.textSecondary,
+    fontSize: 13,
+    marginBottom: 14,
+    marginTop: -4,
+  },
+  voiceStyleGrid: {
+    gap: 10,
+    marginBottom: 14,
+  },
+  voiceCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: theme.surfaceHi,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    padding: 14,
+    gap: 12,
+  },
+  voiceCardIcon: { fontSize: 26 },
+  voiceCardLabel: {
+    color: theme.textPrimary,
+    fontWeight: "700",
+    fontSize: 15,
+    minWidth: 90,
+  },
+  voiceCardDesc: {
+    color: theme.textSecondary,
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 16,
+  },
+  voiceResultBox: {
+    backgroundColor: theme.surfaceHi,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+    minHeight: 120,
+    maxHeight: 320,
+    marginBottom: 14,
+  },
+
+  // ── Cover / Meta ──────────────────────────────────────────────────────
   coverPreview: {
     width: "100%",
     aspectRatio: 1.6,
@@ -652,6 +937,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
 
+  // ── Buttons ───────────────────────────────────────────────────────────
   btn: {
     paddingVertical: 13,
     borderRadius: 12,
