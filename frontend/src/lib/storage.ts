@@ -1,8 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Book, ReaderPrefs } from "./types";
+import { Book, ReaderPrefs, SavedAIKey } from "./types";
 
 const BOOKS_KEY = "@ebook/books";
 const PREFS_KEY = "@ebook/prefs";
+const AI_KEYS_KEY = "@ebook/ai-keys";
+const ACTIVE_KEY_KEY = "@ebook/active-ai-key";
 
 export const defaultPrefs: ReaderPrefs = {
   fontSize: 18,
@@ -54,4 +56,51 @@ export async function getPrefs(): Promise<ReaderPrefs> {
 
 export async function savePrefs(p: ReaderPrefs): Promise<void> {
   await AsyncStorage.setItem(PREFS_KEY, JSON.stringify(p));
+}
+
+// ─── AI Key Storage ─────────────────────────────────────────────────────────
+
+export async function getAIKeys(): Promise<SavedAIKey[]> {
+  const raw = await AsyncStorage.getItem(AI_KEYS_KEY);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as SavedAIKey[];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveAIKey(key: SavedAIKey): Promise<void> {
+  const keys = await getAIKeys();
+  const idx = keys.findIndex((k) => k.id === key.id);
+  if (idx >= 0) keys[idx] = key;
+  else keys.push(key);
+  await AsyncStorage.setItem(AI_KEYS_KEY, JSON.stringify(keys));
+}
+
+export async function deleteAIKey(id: string): Promise<void> {
+  const keys = await getAIKeys();
+  const next = keys.filter((k) => k.id !== id);
+  await AsyncStorage.setItem(AI_KEYS_KEY, JSON.stringify(next));
+  // If this was the active key, clear it
+  const active = await getActiveAIKeyId();
+  if (active === id) {
+    await AsyncStorage.removeItem(ACTIVE_KEY_KEY);
+  }
+}
+
+export async function getActiveAIKeyId(): Promise<string | null> {
+  return AsyncStorage.getItem(ACTIVE_KEY_KEY);
+}
+
+export async function setActiveAIKeyId(id: string): Promise<void> {
+  await AsyncStorage.setItem(ACTIVE_KEY_KEY, id);
+}
+
+/** Get the currently active AI key config, or null if none set. */
+export async function getActiveAIKey(): Promise<SavedAIKey | null> {
+  const activeId = await getActiveAIKeyId();
+  if (!activeId) return null;
+  const keys = await getAIKeys();
+  return keys.find((k) => k.id === activeId) ?? null;
 }

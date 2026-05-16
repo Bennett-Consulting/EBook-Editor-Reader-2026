@@ -38,6 +38,7 @@ export default function EditorScreen() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState("");
   const [aiMode, setAiMode] = useState<AIMode>("continue");
+  const [aiModelInfo, setAiModelInfo] = useState("");
 
   const [showMeta, setShowMeta] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -171,10 +172,12 @@ export default function EditorScreen() {
     setAiMode(mode);
     setAiLoading(true);
     setAiSuggestion("");
+    setAiModelInfo("");
     try {
       const tail = content.length > 1500 ? content.slice(-1500) : content;
       const res = await aiSuggest(tail, mode, book?.id);
       setAiSuggestion(res.suggestion);
+      setAiModelInfo(`${res.provider} · ${res.model}`);
     } catch (e: any) {
       setAiSuggestion(`Couldn't reach the AI assistant.\n${e?.message ?? ""}`);
     } finally {
@@ -296,6 +299,11 @@ export default function EditorScreen() {
             <View style={styles.aiHeader}>
               <Ionicons name="sparkles" size={18} color={theme.brand} />
               <Text style={styles.aiTitle}>AI assistant</Text>
+              {aiModelInfo ? (
+                <Text style={{ color: theme.textTertiary, fontSize: 11, fontFamily: "monospace" }}>
+                  {aiModelInfo}
+                </Text>
+              ) : null}
             </View>
             <View style={styles.aiModes}>
               {(["continue", "improve", "shorten", "expand"] as AIMode[]).map((m) => (

@@ -14,6 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { theme } from "../../src/lib/theme";
 import { ReaderPrefs } from "../../src/lib/types";
 import { getPrefs, savePrefs, defaultPrefs } from "../../src/lib/storage";
+import AIProviderSettings from "../../src/components/AIProviderSettings";
 
 export default function SettingsScreen() {
   const [prefs, setPrefs] = useState<ReaderPrefs>(defaultPrefs);
@@ -52,6 +53,8 @@ export default function SettingsScreen() {
           <Text style={styles.eyebrow}>PREFERENCES</Text>
           <Text style={styles.h1}>Settings</Text>
         </View>
+
+        <AIProviderSettings />
 
         <Text style={styles.section}>READING</Text>
         <View style={styles.card}>
