@@ -29,7 +29,7 @@ export async function parseEpub(uri: string): Promise<ParsedEpub> {
   } else {
     // On native, read as base64
     zipData = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: "base64" as any,
     });
   }
 

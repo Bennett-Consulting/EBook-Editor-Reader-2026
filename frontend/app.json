@@ -34,10 +34,17 @@
           "resizeMode": "contain",
           "backgroundColor": "#000"
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "afe18f07-c79c-4a4e-8893-b2dc7aef8067"
+      }
     }
   }
 }
