@@ -21,6 +21,7 @@ import {
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
+import { Linking } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "../lib/theme";
 import { AIProvider, SavedAIKey } from "../lib/types";
@@ -297,6 +298,29 @@ export default function AIProviderSettings() {
                 <Ionicons name="checkmark-circle" size={16} color="#34d399" />
               </View>
             )}
+
+            {/* Console link */}
+            {effectiveProvider && getProviderConfig(effectiveProvider).consoleUrl ? (
+              <TouchableOpacity
+                style={styles.consoleLinkRow}
+                onPress={() => Linking.openURL(getProviderConfig(effectiveProvider!).consoleUrl!)}
+              >
+                <Ionicons name="open-outline" size={14} color={theme.brand} />
+                <Text style={styles.consoleLinkText}>
+                  Open {getProviderConfig(effectiveProvider).name} key console
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {/* Anthropic one-time warning */}
+            {effectiveProvider && getProviderConfig(effectiveProvider).keyOnlyShownOnce ? (
+              <View style={styles.warningBadge}>
+                <Ionicons name="warning-outline" size={14} color="#f59e0b" />
+                <Text style={styles.warningText}>
+                  Anthropic shows your key only once when created. Copy it immediately before closing the browser.
+                </Text>
+              </View>
+            ) : null}
 
             {/* API Key input */}
             <Text style={styles.label}>API KEY</Text>
@@ -671,6 +695,36 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 2,
     lineHeight: 15,
+  },
+  consoleLinkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 10,
+  },
+  consoleLinkText: {
+    color: theme.brand,
+    fontSize: 13,
+    fontWeight: "600",
+    textDecorationLine: "underline",
+  },
+  warningBadge: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: "rgba(245,158,11,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(245,158,11,0.3)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  warningText: {
+    color: "#f59e0b",
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 17,
   },
   detectedBadge: {
     flexDirection: "row",

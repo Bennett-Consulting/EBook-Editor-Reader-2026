@@ -50,6 +50,7 @@ const PROVIDER_CONFIGS: Record<AIProvider, AIProviderConfig> = {
     authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
     icon: "🟢",
     keyPlaceholder: "sk-...",
+    consoleUrl: "https://platform.openai.com/api-keys",
   },
   google: {
     name: "Google Gemini",
@@ -59,6 +60,7 @@ const PROVIDER_CONFIGS: Record<AIProvider, AIProviderConfig> = {
     authHeader: () => ({}), // Uses query param
     icon: "🔵",
     keyPlaceholder: "AIza...",
+    consoleUrl: "https://aistudio.google.com/app/apikey",
   },
   anthropic: {
     name: "Anthropic",
@@ -72,6 +74,8 @@ const PROVIDER_CONFIGS: Record<AIProvider, AIProviderConfig> = {
     }),
     icon: "🟠",
     keyPlaceholder: "sk-ant-...",
+    consoleUrl: "https://console.anthropic.com/settings/keys",
+    keyOnlyShownOnce: true,
   },
   groq: {
     name: "Groq",
@@ -81,6 +85,7 @@ const PROVIDER_CONFIGS: Record<AIProvider, AIProviderConfig> = {
     authHeader: (key) => ({ Authorization: `Bearer ${key}` }),
     icon: "⚡",
     keyPlaceholder: "gsk_...",
+    consoleUrl: "https://console.groq.com/keys",
   },
   ollama: {
     name: "Ollama (Local)",

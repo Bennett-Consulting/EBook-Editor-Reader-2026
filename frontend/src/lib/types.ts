@@ -81,6 +81,8 @@ export interface AIProviderConfig {
   authHeader: (key: string) => Record<string, string>;
   icon: string;
   keyPlaceholder: string;
+  consoleUrl?: string;       // where to create/copy API keys
+  keyOnlyShownOnce?: boolean; // true = warn user to copy immediately (Anthropic)
 }
 
 export interface AIModel {
