@@ -5,7 +5,7 @@
  * Auto-detects provider from key prefix. Discovers models on validation.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -54,6 +54,7 @@ export default function AIProviderSettings() {
   const [manualProvider, setManualProvider] = useState<AIProvider | null>(null);
   const [validating, setValidating] = useState(false);
   const [providerPickerOpen, setProviderPickerOpen] = useState(false);
+  const keyInputRef = useRef<any>(null);
 
   const load = useCallback(async () => {
     const [savedKeys, active] = await Promise.all([
@@ -83,10 +84,14 @@ export default function AIProviderSettings() {
 
   const effectiveProvider = manualProvider || detectedProvider;
 
-  const pasteFromClipboard = async () => {
+  const openClipboard = async () => {
+    // Try to paste the current clipboard item first
     const text = await Clipboard.getStringAsync();
-    if (text?.trim()) setNewKeyText(text.trim());
-    else Alert.alert("Nothing to paste", "Copy your API key first, then tap Paste.");
+    if (text?.trim()) {
+      setNewKeyText(text.trim());
+    }
+    // Focus the field so the user can long-press for full clipboard history & pinned items
+    keyInputRef.current?.focus();
   };
 
   const importFromFile = async () => {
@@ -296,6 +301,7 @@ export default function AIProviderSettings() {
             {/* API Key input */}
             <Text style={styles.label}>API KEY</Text>
             <TextInput
+              ref={keyInputRef}
               value={newKeyText}
               onChangeText={setNewKeyText}
               placeholder="Paste your API key here..."
@@ -308,15 +314,18 @@ export default function AIProviderSettings() {
               multiline={false}
             />
             <View style={styles.keyActions}>
-              <TouchableOpacity style={styles.keyActionBtn} onPress={pasteFromClipboard}>
+              <TouchableOpacity style={styles.keyActionBtn} onPress={openClipboard}>
                 <Ionicons name="clipboard-outline" size={15} color={theme.brand} />
-                <Text style={styles.keyActionText}>Paste</Text>
+                <Text style={styles.keyActionText}>Clipboard</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.keyActionBtn} onPress={importFromFile}>
                 <Ionicons name="document-outline" size={15} color={theme.brand} />
                 <Text style={styles.keyActionText}>Import from file</Text>
               </TouchableOpacity>
             </View>
+            <Text style={styles.keyHint}>
+              Long-press the field above to choose from clipboard history &amp; pinned items
+            </Text>
 
             {/* Manual provider selector (if auto-detect returns custom) */}
             {(detectedProvider === "custom" || detectedProvider === null) &&
@@ -655,6 +664,13 @@ const styles = StyleSheet.create({
     color: theme.brand,
     fontSize: 13,
     fontWeight: "600",
+  },
+  keyHint: {
+    color: theme.textTertiary,
+    fontSize: 11,
+    marginTop: 6,
+    marginBottom: 2,
+    lineHeight: 15,
   },
   detectedBadge: {
     flexDirection: "row",
