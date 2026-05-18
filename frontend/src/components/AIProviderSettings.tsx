@@ -18,6 +18,9 @@ import {
   Alert,
   Pressable,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "../lib/theme";
 import { AIProvider, SavedAIKey } from "../lib/types";
@@ -79,6 +82,28 @@ export default function AIProviderSettings() {
   }, [newKeyText]);
 
   const effectiveProvider = manualProvider || detectedProvider;
+
+  const pasteFromClipboard = async () => {
+    const text = await Clipboard.getStringAsync();
+    if (text?.trim()) setNewKeyText(text.trim());
+    else Alert.alert("Nothing to paste", "Copy your API key first, then tap Paste.");
+  };
+
+  const importFromFile = async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: ["text/plain", ".txt", ".key"],
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      const text = await FileSystem.readAsStringAsync(res.assets[0].uri);
+      const key = text.trim().split(/\s+/)[0]; // first word/line only
+      if (key) setNewKeyText(key);
+      else Alert.alert("Empty file", "The file didn't contain a key.");
+    } catch (e: any) {
+      Alert.alert("Import failed", e?.message ?? "Could not read file.");
+    }
+  };
 
   const handleAdd = async () => {
     const key = newKeyText.trim();
@@ -278,9 +303,20 @@ export default function AIProviderSettings() {
               style={styles.input}
               autoCapitalize="none"
               autoCorrect={false}
+              autoComplete="password"
               secureTextEntry={false}
               multiline={false}
             />
+            <View style={styles.keyActions}>
+              <TouchableOpacity style={styles.keyActionBtn} onPress={pasteFromClipboard}>
+                <Ionicons name="clipboard-outline" size={15} color={theme.brand} />
+                <Text style={styles.keyActionText}>Paste</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.keyActionBtn} onPress={importFromFile}>
+                <Ionicons name="document-outline" size={15} color={theme.brand} />
+                <Text style={styles.keyActionText}>Import from file</Text>
+              </TouchableOpacity>
+            </View>
 
             {/* Manual provider selector (if auto-detect returns custom) */}
             {(detectedProvider === "custom" || detectedProvider === null) &&
@@ -597,6 +633,28 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 15,
     fontFamily: "monospace",
+  },
+  keyActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  keyActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,176,0,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,176,0,0.25)",
+  },
+  keyActionText: {
+    color: theme.brand,
+    fontSize: 13,
+    fontWeight: "600",
   },
   detectedBadge: {
     flexDirection: "row",
