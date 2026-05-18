@@ -433,9 +433,21 @@ async function _chatGemini(
     throw new Error(`Gemini ${model}: ${resp.status} — ${err.slice(0, 200)}`);
   }
   const data = await resp.json();
-  return (
-    data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ""
-  );
+
+  const candidate = data.candidates?.[0];
+  if (!candidate) {
+    const blockReason = data.promptFeedback?.blockReason;
+    throw new Error(`Gemini returned no response${blockReason ? `: blocked (${blockReason})` : ""}`);
+  }
+
+  const finishReason = candidate.finishReason;
+  if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
+    throw new Error(`Gemini stopped: ${finishReason} — try a different model or shorter text`);
+  }
+
+  const text = candidate?.content?.parts?.[0]?.text?.trim();
+  if (!text) throw new Error("Gemini returned an empty response");
+  return text;
 }
 
 async function _chatAnthropic(
