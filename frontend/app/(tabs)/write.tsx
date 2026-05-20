@@ -14,6 +14,7 @@ import { coverPalette, theme } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
 import { getBooks, saveBook, deleteBook } from "../../src/lib/storage";
 import { confirmAction } from "../../src/lib/dialogs";
+import EmptyState from "../../src/components/EmptyState";
 
 function makeId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
