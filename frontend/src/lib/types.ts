@@ -71,6 +71,7 @@ export type AIProvider =
   | "anthropic"
   | "groq"
   | "ollama"
+  | "bitnet"
   | "custom";
 
 export interface AIProviderConfig {

@@ -55,6 +55,14 @@ export const SEED_PROVIDERS: ProviderEntry[] = [
     openaiCompatible: true,
   },
   {
+    id: "bitnet",
+    name: "BitNet (CPU)",
+    icon: "⚛️",
+    consoleUrl: "https://github.com/microsoft/BitNet",
+    keyOnlyShownOnce: false,
+    openaiCompatible: true,
+  },
+  {
     id: "azure",
     name: "Azure OpenAI",
     icon: "💙",
