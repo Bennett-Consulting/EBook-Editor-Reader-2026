@@ -17,6 +17,7 @@ const KEY_PATTERNS: { pattern: RegExp; provider: AIProvider }[] = [
   { pattern: /^sk-/, provider: "openai" },
   { pattern: /^AIza/, provider: "google" },
   { pattern: /^gsk_/, provider: "groq" },
+  { pattern: /^bitnet-local$/, provider: "bitnet" },
 ];
 
 /**
@@ -96,6 +97,16 @@ const PROVIDER_CONFIGS: Record<AIProvider, AIProviderConfig> = {
     icon: "🏠",
     keyPlaceholder: "http://localhost:11434",
   },
+  bitnet: {
+    name: "BitNet (CPU)",
+    baseUrl: "http://localhost:8080",
+    modelsEndpoint: "/v1/models",
+    chatEndpoint: "/v1/chat/completions",
+    authHeader: () => ({}),
+    icon: "⚛️",
+    keyPlaceholder: "http://localhost:8080",
+    consoleUrl: "https://github.com/microsoft/BitNet",
+  },
   custom: {
     name: "Custom / Other",
     baseUrl: "",
@@ -132,6 +143,9 @@ export async function discoverModels(
     }
     if (provider === "ollama") {
       return await _discoverOllamaModels(baseUrl);
+    }
+    if (provider === "bitnet") {
+      return await _discoverBitnetModels(baseUrl);
     }
 
     // OpenAI-compatible providers (OpenAI, Groq, Custom)
@@ -215,6 +229,19 @@ async function _discoverOllamaModels(baseUrl: string): Promise<AIModel[]> {
   }));
 }
 
+async function _discoverBitnetModels(baseUrl: string): Promise<AIModel[]> {
+  // BitNet's llama-server exposes OpenAI-compatible /v1/models
+  const resp = await fetch(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(3000) });
+  if (!resp.ok) throw new Error(`BitNet: ${resp.status}`);
+  const data = await resp.json();
+  return (data.data || []).map((m: any) => ({
+    id: m.id,
+    name: m.id,
+    provider: "bitnet" as AIProvider,
+    tier: "pro" as const, // Local CPU models — no cost, sovereign inference
+  }));
+}
+
 function _parseAnthropicModels(data: any): AIModel[] {
   const models = data.data || [];
   return models.map((m: any) => ({
@@ -292,6 +319,7 @@ function _getFallbackModels(provider: AIProvider): AIModel[] {
       { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B", provider: "groq", tier: "flash" },
     ],
     ollama: [],
+    bitnet: [],
     custom: [],
   };
   return fallbacks[provider] || [];
@@ -362,6 +390,19 @@ export async function chat(opts: ChatOptions): Promise<string> {
   if (provider === "ollama") {
     const baseUrl = customBaseUrl || "http://localhost:11434";
     return _chatOllama(baseUrl, model, messages, temperature);
+  }
+  if (provider === "bitnet") {
+    // BitNet's llama-server speaks OpenAI chat/completions natively
+    const baseUrl = customBaseUrl || "http://localhost:8080";
+    return _chatOpenAICompat(
+      `${baseUrl}/v1`,
+      "",  // No API key needed for local BitNet
+      model,
+      messages,
+      maxTokens,
+      temperature,
+      { "Content-Type": "application/json" }
+    );
   }
 
   // OpenAI-compatible (OpenAI, Groq, Custom)
@@ -521,6 +562,14 @@ export async function validateKey(
   customBaseUrl?: string
 ): Promise<{ valid: boolean; modelCount: number; error?: string }> {
   try {
+    // BitNet doesn't need an API key — just check if the server is running
+    if (provider === "bitnet") {
+      const baseUrl = customBaseUrl || "http://localhost:8080";
+      const models = await _discoverBitnetModels(baseUrl);
+      return models.length > 0
+        ? { valid: true, modelCount: models.length }
+        : { valid: false, modelCount: 0, error: "BitNet server running but no models loaded" };
+    }
     const models = await discoverModels(provider, apiKey, customBaseUrl);
     if (models.length > 0) {
       return { valid: true, modelCount: models.length };

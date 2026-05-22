@@ -46,6 +46,7 @@ const TABLE_ID_TO_PROVIDER: Record<string, string> = {
   anthropic: "anthropic",
   groq: "groq",
   ollama: "ollama",
+  bitnet: "bitnet",
   huggingface: "openai",   // OpenAI-compatible
   together: "openai",
   perplexity: "openai",
@@ -357,13 +358,13 @@ export default function AIProviderSettings() {
                 ) : null}
 
                 {/* Custom base URL */}
-                {selectedEntry.id === "custom" || selectedEntry.id === "ollama" ? (
+                {selectedEntry.id === "custom" || selectedEntry.id === "ollama" || selectedEntry.id === "bitnet" ? (
                   <>
                     <Text style={styles.label}>BASE URL</Text>
                     <TextInput
                       value={newBaseUrl}
                       onChangeText={setNewBaseUrl}
-                      placeholder={selectedEntry.id === "ollama" ? "http://localhost:11434" : "https://your-server.com/v1"}
+                      placeholder={selectedEntry.id === "ollama" ? "http://localhost:11434" : selectedEntry.id === "bitnet" ? "http://localhost:8080" : "https://your-server.com/v1"}
                       placeholderTextColor={theme.textTertiary}
                       style={styles.input}
                       autoCapitalize="none"
