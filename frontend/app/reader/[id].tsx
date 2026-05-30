@@ -1,4 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+/**
+ * Reader Screen — PR #6: Full Reader Chrome
+ *
+ * Features:
+ *   - Auto-hiding toolbar & bottom bar (tap center to toggle)
+ *   - TOC drawer (left slide-in, chapter navigation)
+ *   - Full-text search overlay with prev/next navigation
+ *   - Reading progress bar with chapter info & time remaining
+ *   - Quick bookmark from bottom bar
+ *   - Enhanced toolbar with search, TOC toggle, bookmark count
+ */
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -11,10 +23,16 @@ import {
   Alert,
   Platform,
   KeyboardAvoidingView,
+  Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Animated, {
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+} from "react-native-reanimated";
 import { theme } from "../../src/lib/theme";
 import { Annotation, Book, ReaderPrefs } from "../../src/lib/types";
 import {
@@ -26,19 +44,39 @@ import {
 } from "../../src/lib/storage";
 import { exportBook } from "../../src/lib/exporter";
 import ExportSheet from "../../src/components/ExportSheet";
+import TOCDrawer, {
+  extractTOC,
+  TOCEntry,
+} from "../../src/components/reader/TOCDrawer";
+import SearchOverlay, {
+  SearchMatch,
+} from "../../src/components/reader/SearchOverlay";
+import ReadingProgress from "../../src/components/reader/ReadingProgress";
 
 function makeId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+const { height: SCREEN_H } = Dimensions.get("window");
 
 export default function ReaderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [book, setBook] = useState<Book | null>(null);
   const [prefs, setPrefs] = useState<ReaderPrefs>(defaultPrefs);
+
+  // Chrome visibility (auto-hide)
+  const [chromeVisible, setChromeVisible] = useState(true);
+  const chromeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Drawer / overlay state
+  const [showTOC, setShowTOC] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [showExport, setShowExport] = useState(false);
+
+  // Highlight / note modal
   const [highlightModal, setHighlightModal] = useState<{
     visible: boolean;
     paraIndex: number;
@@ -46,10 +84,20 @@ export default function ReaderScreen() {
   }>({ visible: false, paraIndex: -1, paraText: "" });
   const [noteText, setNoteText] = useState("");
 
+  // Search state
+  const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
+  const [activeSearchIdx, setActiveSearchIdx] = useState(0);
+
+  // Current scroll position tracking
+  const [currentParagraph, setCurrentParagraph] = useState(0);
+
   const scrollRef = useRef<ScrollView>(null);
   const contentHeightRef = useRef(0);
   const layoutHeightRef = useRef(1);
   const scrollSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const paraOffsetsRef = useRef<number[]>([]);
+
+  // ── Load book & prefs ────────────────────────────────────────────────────
 
   useEffect(() => {
     (async () => {
@@ -64,6 +112,8 @@ export default function ReaderScreen() {
     })();
   }, [id]);
 
+  // ── Paragraphs & TOC ────────────────────────────────────────────────────
+
   const paragraphs = useMemo(() => {
     if (!book) return [];
     return book.content
@@ -71,6 +121,42 @@ export default function ReaderScreen() {
       .map((p) => p.trim())
       .filter(Boolean);
   }, [book]);
+
+  const tocEntries = useMemo(() => extractTOC(paragraphs), [paragraphs]);
+
+  const totalWords = useMemo(() => {
+    if (!book) return 0;
+    return book.content.split(/\s+/).filter(Boolean).length;
+  }, [book]);
+
+  // ── Chrome auto-hide ─────────────────────────────────────────────────────
+
+  const resetChromeTimer = useCallback(() => {
+    if (chromeTimer.current) clearTimeout(chromeTimer.current);
+    chromeTimer.current = setTimeout(() => {
+      // Only auto-hide if no drawers/modals are open
+      if (!showTOC && !showSearch && !showSettings && !showAnnotations && !showExport) {
+        setChromeVisible(false);
+      }
+    }, 5000);
+  }, [showTOC, showSearch, showSettings, showAnnotations, showExport]);
+
+  const toggleChrome = useCallback(() => {
+    setChromeVisible((prev) => {
+      const next = !prev;
+      if (next) resetChromeTimer();
+      return next;
+    });
+  }, [resetChromeTimer]);
+
+  // Show chrome when any overlay opens
+  useEffect(() => {
+    if (showTOC || showSearch || showSettings || showAnnotations || showExport) {
+      setChromeVisible(true);
+    }
+  }, [showTOC, showSearch, showSettings, showAnnotations, showExport]);
+
+  // ── Scroll tracking ──────────────────────────────────────────────────────
 
   if (!book) {
     return (
@@ -92,13 +178,58 @@ export default function ReaderScreen() {
       const total = Math.max(1, contentHeightRef.current - layoutHeightRef.current);
       const progress = Math.min(1, Math.max(0, y / total));
       saveBook({ ...book, scrollY: y, progress });
-    }, 1000);
+      setBook((prev) => prev ? { ...prev, scrollY: y, progress } : prev);
+
+      // Estimate current paragraph from scroll position
+      const offsets = paraOffsetsRef.current;
+      if (offsets.length > 0) {
+        let idx = 0;
+        for (let i = offsets.length - 1; i >= 0; i--) {
+          if (offsets[i] <= y + 100) {
+            idx = i;
+            break;
+          }
+        }
+        setCurrentParagraph(idx);
+      }
+    }, 500);
   };
 
   const updatePrefs = async (next: ReaderPrefs) => {
     setPrefs(next);
     await savePrefs(next);
   };
+
+  // ── Scroll to paragraph ──────────────────────────────────────────────────
+
+  const scrollToParagraph = useCallback(
+    (index: number) => {
+      const offsets = paraOffsetsRef.current;
+      if (offsets[index] !== undefined && scrollRef.current) {
+        scrollRef.current.scrollTo({ y: offsets[index] - 80, animated: true });
+      }
+    },
+    []
+  );
+
+  // ── Search handlers ──────────────────────────────────────────────────────
+
+  const handleSearchHighlight = useCallback(
+    (matches: SearchMatch[], activeIndex: number) => {
+      setSearchMatches(matches);
+      setActiveSearchIdx(activeIndex);
+    },
+    []
+  );
+
+  const handleSearchNavigate = useCallback(
+    (paraIndex: number) => {
+      scrollToParagraph(paraIndex);
+    },
+    [scrollToParagraph]
+  );
+
+  // ── Highlight / annotations ──────────────────────────────────────────────
 
   const openHighlightModal = (paraIndex: number, paraText: string) => {
     setNoteText("");
@@ -137,9 +268,77 @@ export default function ReaderScreen() {
   const annotationFor = (paraText: string) =>
     book.annotations.find((a) => a.text === paraText);
 
+  // Check if current paragraph is bookmarked
+  const isCurrentBookmarked = useMemo(() => {
+    if (paragraphs.length === 0) return false;
+    const currentText = paragraphs[currentParagraph];
+    return currentText ? isHighlighted(currentText) : false;
+  }, [currentParagraph, paragraphs, book?.annotations]);
+
+  const handleQuickBookmark = useCallback(async () => {
+    if (paragraphs.length === 0) return;
+    const paraText = paragraphs[currentParagraph];
+    if (!paraText) return;
+
+    const existing = annotationFor(paraText);
+    if (existing) {
+      // Remove bookmark
+      await removeAnnotation(existing.id);
+    } else {
+      // Add bookmark
+      const start = book.content.indexOf(paraText);
+      const end = start + paraText.length;
+      const ann: Annotation = {
+        id: makeId(),
+        text: paraText,
+        note: "📌 Bookmark",
+        start: start >= 0 ? start : 0,
+        end: start >= 0 ? end : paraText.length,
+        color: theme.brand,
+        createdAt: new Date().toISOString(),
+      };
+      const next = { ...book, annotations: [...book.annotations, ann] };
+      setBook(next);
+      await saveBook(next);
+    }
+  }, [currentParagraph, paragraphs, book]);
+
+  // ── Check if paragraph has search match ──────────────────────────────────
+
+  const getSearchHighlight = (paraIndex: number) => {
+    if (searchMatches.length === 0) return null;
+    const match = searchMatches.find((m) => m.paraIndex === paraIndex);
+    if (!match) return null;
+    const isActive = searchMatches[activeSearchIdx]?.paraIndex === paraIndex;
+    return { match, isActive };
+  };
+
+  // ── Animated toolbar ─────────────────────────────────────────────────────
+
+  const toolbarStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateY: withTiming(chromeVisible ? 0 : -80, {
+          duration: 250,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        }),
+      },
+    ],
+    opacity: withTiming(chromeVisible ? 1 : 0, { duration: 200 }),
+  }));
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: bg }]} edges={["top"]}>
-      <View style={[styles.toolbar, { borderBottomColor: paperMode ? "#0001" : theme.border }]}>
+      {/* ─── Toolbar ─── */}
+      <Animated.View
+        style={[
+          styles.toolbar,
+          { borderBottomColor: paperMode ? "#0001" : theme.border },
+          toolbarStyle,
+        ]}
+      >
         <TouchableOpacity
           testID="reader-back"
           onPress={() => router.back()}
@@ -147,7 +346,16 @@ export default function ReaderScreen() {
         >
           <Ionicons name="chevron-back" size={22} color={paperMode ? "#222" : theme.textPrimary} />
         </TouchableOpacity>
-        <View style={{ flex: 1, marginHorizontal: 12 }}>
+
+        <TouchableOpacity
+          testID="reader-toc-toggle"
+          onPress={() => setShowTOC(true)}
+          style={styles.iconBtn}
+        >
+          <Ionicons name="list" size={20} color={paperMode ? "#222" : theme.textPrimary} />
+        </TouchableOpacity>
+
+        <View style={{ flex: 1, marginHorizontal: 4 }}>
           <Text numberOfLines={1} style={[styles.tbTitle, { color: paperMode ? "#222" : theme.textPrimary }]}>
             {book.title}
           </Text>
@@ -155,44 +363,44 @@ export default function ReaderScreen() {
             {book.author} · {Math.round((book.progress || 0) * 100)}%
           </Text>
         </View>
+
+        <TouchableOpacity
+          testID="reader-search"
+          onPress={() => setShowSearch(true)}
+          style={styles.iconBtn}
+        >
+          <Ionicons name="search" size={20} color={paperMode ? "#222" : theme.textPrimary} />
+        </TouchableOpacity>
+
         <TouchableOpacity
           testID="reader-edit"
           onPress={() => router.push(`/editor/${book.id}`)}
           style={styles.iconBtn}
         >
-          <Ionicons
-            name="create-outline"
-            size={20}
-            color={paperMode ? "#222" : theme.textPrimary}
-          />
+          <Ionicons name="create-outline" size={20} color={paperMode ? "#222" : theme.textPrimary} />
         </TouchableOpacity>
+
         <TouchableOpacity
           testID="reader-export"
           onPress={() => setShowExport(true)}
           style={styles.iconBtn}
         >
-          <Ionicons
-            name="share-outline"
-            size={20}
-            color={paperMode ? "#222" : theme.textPrimary}
-          />
+          <Ionicons name="share-outline" size={20} color={paperMode ? "#222" : theme.textPrimary} />
         </TouchableOpacity>
+
         <TouchableOpacity
           testID="reader-annotations"
           onPress={() => setShowAnnotations(true)}
           style={styles.iconBtn}
         >
-          <Ionicons
-            name="bookmark-outline"
-            size={20}
-            color={paperMode ? "#222" : theme.textPrimary}
-          />
+          <Ionicons name="bookmark-outline" size={20} color={paperMode ? "#222" : theme.textPrimary} />
           {book.annotations.length > 0 && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{book.annotations.length}</Text>
             </View>
           )}
         </TouchableOpacity>
+
         <TouchableOpacity
           testID="reader-settings"
           onPress={() => setShowSettings(true)}
@@ -200,87 +408,151 @@ export default function ReaderScreen() {
         >
           <Ionicons name="text" size={20} color={paperMode ? "#222" : theme.textPrimary} />
         </TouchableOpacity>
-      </View>
+      </Animated.View>
 
-      <ScrollView
-        ref={scrollRef}
-        testID="reader-scroll"
-        style={{ flex: 1, backgroundColor: bg }}
-        contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 24, paddingBottom: 160 }}
-        onScroll={(e) => persistScroll(e.nativeEvent.contentOffset.y)}
-        scrollEventThrottle={300}
-        onContentSizeChange={(_w, h) => (contentHeightRef.current = h)}
-        onLayout={(e) => (layoutHeightRef.current = e.nativeEvent.layout.height)}
-      >
-        <Text
-          style={[
-            styles.bookTitle,
-            { color: paperMode ? "#1a1a1a" : theme.textPrimary, fontFamily: prefs.serif ? Platform.select({ ios: "Georgia", default: "serif" }) : undefined },
-          ]}
+      {/* ─── Content ─── */}
+      <Pressable style={{ flex: 1 }} onPress={toggleChrome}>
+        <ScrollView
+          ref={scrollRef}
+          testID="reader-scroll"
+          style={{ flex: 1, backgroundColor: bg }}
+          contentContainerStyle={{ paddingHorizontal: 22, paddingTop: 24, paddingBottom: 160 }}
+          onScroll={(e) => persistScroll(e.nativeEvent.contentOffset.y)}
+          scrollEventThrottle={200}
+          onContentSizeChange={(_w, h) => (contentHeightRef.current = h)}
+          onLayout={(e) => (layoutHeightRef.current = e.nativeEvent.layout.height)}
         >
-          {book.title}
-        </Text>
-        <Text style={[styles.bookAuthor, { color: sub }]}>{book.author}</Text>
+          <Text
+            style={[
+              styles.bookTitle,
+              {
+                color: paperMode ? "#1a1a1a" : theme.textPrimary,
+                fontFamily: prefs.serif
+                  ? Platform.select({ ios: "Georgia", default: "serif" })
+                  : undefined,
+              },
+            ]}
+          >
+            {book.title}
+          </Text>
+          <Text style={[styles.bookAuthor, { color: sub }]}>{book.author}</Text>
 
-        {paragraphs.map((p, i) => {
-          const highlighted = isHighlighted(p);
-          const ann = annotationFor(p);
-          const isHeading = /^#{1,3}\s/.test(p) || /^chapter\s/i.test(p);
-          return (
-            <Pressable
-              key={i}
-              testID={`para-${i}`}
-              onLongPress={() => openHighlightModal(i, p)}
-              delayLongPress={300}
-            >
-              {isHeading ? (
-                <Text
-                  style={[
-                    styles.heading,
-                    {
-                      color: paperMode ? "#1a1a1a" : theme.textPrimary,
-                      fontFamily: prefs.serif
-                        ? Platform.select({ ios: "Georgia", default: "serif" })
-                        : undefined,
-                    },
-                  ]}
-                >
-                  {p.replace(/^#{1,3}\s/, "")}
-                </Text>
-              ) : (
-                <Text
-                  style={[
-                    {
-                      color: txt,
-                      fontSize: prefs.fontSize,
-                      lineHeight: prefs.fontSize * prefs.lineHeight,
-                      marginBottom: 18,
-                      fontFamily: prefs.serif
-                        ? Platform.select({ ios: "Georgia", default: "serif" })
-                        : undefined,
-                      backgroundColor: highlighted ? theme.highlight : "transparent",
-                      paddingHorizontal: highlighted ? 4 : 0,
-                      borderRadius: highlighted ? 4 : 0,
-                    },
-                  ]}
-                >
-                  {p}
-                </Text>
-              )}
-              {ann?.note ? (
-                <View style={[styles.noteBox, { backgroundColor: paperMode ? "#0000000d" : theme.surface }]}>
-                  <Ionicons name="chatbubble-ellipses-outline" size={14} color={theme.brand} />
-                  <Text style={[styles.noteText, { color: paperMode ? "#3a3a3a" : theme.textSecondary }]}>
-                    {ann.note}
+          {paragraphs.map((p, i) => {
+            const highlighted = isHighlighted(p);
+            const ann = annotationFor(p);
+            const isHeading = /^#{1,3}\s/.test(p) || /^chapter\s/i.test(p);
+            const searchHL = getSearchHighlight(i);
+
+            return (
+              <Pressable
+                key={i}
+                testID={`para-${i}`}
+                onLongPress={() => openHighlightModal(i, p)}
+                delayLongPress={300}
+                onLayout={(e) => {
+                  paraOffsetsRef.current[i] = e.nativeEvent.layout.y;
+                }}
+              >
+                {isHeading ? (
+                  <Text
+                    style={[
+                      styles.heading,
+                      {
+                        color: paperMode ? "#1a1a1a" : theme.textPrimary,
+                        fontFamily: prefs.serif
+                          ? Platform.select({ ios: "Georgia", default: "serif" })
+                          : undefined,
+                      },
+                    ]}
+                  >
+                    {p.replace(/^#{1,3}\s/, "")}
                   </Text>
-                </View>
-              ) : null}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+                ) : (
+                  <Text
+                    style={[
+                      {
+                        color: txt,
+                        fontSize: prefs.fontSize,
+                        lineHeight: prefs.fontSize * prefs.lineHeight,
+                        marginBottom: 18,
+                        fontFamily: prefs.serif
+                          ? Platform.select({ ios: "Georgia", default: "serif" })
+                          : undefined,
+                        backgroundColor: searchHL
+                          ? searchHL.isActive
+                            ? "rgba(255,176,0,0.4)"
+                            : "rgba(255,176,0,0.15)"
+                          : highlighted
+                          ? theme.highlight
+                          : "transparent",
+                        paddingHorizontal: highlighted || searchHL ? 4 : 0,
+                        borderRadius: highlighted || searchHL ? 4 : 0,
+                      },
+                    ]}
+                  >
+                    {p}
+                  </Text>
+                )}
+                {ann?.note ? (
+                  <View
+                    style={[
+                      styles.noteBox,
+                      { backgroundColor: paperMode ? "#0000000d" : theme.surface },
+                    ]}
+                  >
+                    <Ionicons name="chatbubble-ellipses-outline" size={14} color={theme.brand} />
+                    <Text
+                      style={[
+                        styles.noteText,
+                        { color: paperMode ? "#3a3a3a" : theme.textSecondary },
+                      ]}
+                    >
+                      {ann.note}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </Pressable>
 
-      {/* Settings Sheet */}
+      {/* ─── Reading Progress Bar ─── */}
+      <ReadingProgress
+        visible={chromeVisible}
+        progress={book.progress || 0}
+        currentParagraph={currentParagraph}
+        totalParagraphs={paragraphs.length}
+        tocEntries={tocEntries}
+        totalWords={totalWords}
+        paperMode={paperMode}
+        isBookmarked={isCurrentBookmarked}
+        onBookmark={handleQuickBookmark}
+        onTOCOpen={() => setShowTOC(true)}
+      />
+
+      {/* ─── Search Overlay ─── */}
+      <SearchOverlay
+        visible={showSearch}
+        paragraphs={paragraphs}
+        onNavigate={handleSearchNavigate}
+        onHighlightChange={handleSearchHighlight}
+        onClose={() => setShowSearch(false)}
+      />
+
+      {/* ─── TOC Drawer ─── */}
+      <TOCDrawer
+        visible={showTOC}
+        entries={tocEntries}
+        currentIndex={currentParagraph}
+        bookTitle={book.title}
+        bookAuthor={book.author}
+        progress={book.progress || 0}
+        onSelect={scrollToParagraph}
+        onClose={() => setShowTOC(false)}
+      />
+
+      {/* ─── Settings Sheet ─── */}
       <Modal
         visible={showSettings}
         transparent
@@ -301,10 +573,16 @@ export default function ReaderScreen() {
               label="Line height"
               value={prefs.lineHeight.toFixed(1)}
               onMinus={() =>
-                updatePrefs({ ...prefs, lineHeight: Math.max(1.4, +(prefs.lineHeight - 0.1).toFixed(1)) })
+                updatePrefs({
+                  ...prefs,
+                  lineHeight: Math.max(1.4, +(prefs.lineHeight - 0.1).toFixed(1)),
+                })
               }
               onPlus={() =>
-                updatePrefs({ ...prefs, lineHeight: Math.min(2.2, +(prefs.lineHeight + 0.1).toFixed(1)) })
+                updatePrefs({
+                  ...prefs,
+                  lineHeight: Math.min(2.2, +(prefs.lineHeight + 0.1).toFixed(1)),
+                })
               }
             />
             <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
@@ -323,7 +601,7 @@ export default function ReaderScreen() {
         </Pressable>
       </Modal>
 
-      {/* Annotations List */}
+      {/* ─── Annotations List ─── */}
       <Modal
         visible={showAnnotations}
         transparent
@@ -360,12 +638,14 @@ export default function ReaderScreen() {
         </Pressable>
       </Modal>
 
-      {/* Highlight + Note Modal */}
+      {/* ─── Highlight + Note Modal ─── */}
       <Modal
         visible={highlightModal.visible}
         transparent
         animationType="fade"
-        onRequestClose={() => setHighlightModal({ visible: false, paraIndex: -1, paraText: "" })}
+        onRequestClose={() =>
+          setHighlightModal({ visible: false, paraIndex: -1, paraText: "" })
+        }
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -375,7 +655,7 @@ export default function ReaderScreen() {
             <View style={styles.handle} />
             <Text style={styles.sheetTitle}>Highlight passage</Text>
             <Text numberOfLines={4} style={styles.previewQuote}>
-              “{highlightModal.paraText}”
+              "{highlightModal.paraText}"
             </Text>
             <TextInput
               testID="note-input"
@@ -389,7 +669,9 @@ export default function ReaderScreen() {
             <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
               <TouchableOpacity
                 testID="cancel-highlight"
-                onPress={() => setHighlightModal({ visible: false, paraIndex: -1, paraText: "" })}
+                onPress={() =>
+                  setHighlightModal({ visible: false, paraIndex: -1, paraText: "" })
+                }
                 style={[styles.btn, styles.btnGhost, { flex: 1 }]}
               >
                 <Text style={styles.btnGhostText}>Cancel</Text>
@@ -406,14 +688,12 @@ export default function ReaderScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      <ExportSheet
-        visible={showExport}
-        book={book}
-        onClose={() => setShowExport(false)}
-      />
+      <ExportSheet visible={showExport} book={book} onClose={() => setShowExport(false)} />
     </SafeAreaView>
   );
 }
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
 
 function SheetCounter({
   label,
@@ -464,19 +744,22 @@ function ToggleChip({
   );
 }
 
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   toolbar: {
     height: 56,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     borderBottomWidth: 1,
+    zIndex: 50,
   },
   iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -484,8 +767,8 @@ const styles = StyleSheet.create({
   tbAuthor: { fontSize: 11, marginTop: 1 },
   badge: {
     position: "absolute",
-    top: 4,
-    right: 6,
+    top: 3,
+    right: 4,
     backgroundColor: theme.brand,
     minWidth: 16,
     height: 16,
