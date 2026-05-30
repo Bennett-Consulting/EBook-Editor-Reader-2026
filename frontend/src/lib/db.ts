@@ -52,7 +52,7 @@ export async function initDatabase(db: SQLiteDatabase): Promise<void> {
         title         TEXT,
         timestamp     INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_chunks_doc
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_doc
         ON document_chunks(document_id, chunk_index);
 
       CREATE TABLE IF NOT EXISTS annotations (
@@ -263,6 +263,78 @@ export const chunksDao = {
       "DELETE FROM document_chunks WHERE document_id = ? AND chunk_index >= ?",
       [documentId, fromIndex]
     );
+  },
+
+  /**
+   * Delete a single chunk by document + index.
+   * Used after merging pages to remove the old page.
+   *
+   * Android equivalent: DocumentChunksDao.deleteSpecificChunk()
+   */
+  async deleteChunk(
+    db: SQLiteDatabase,
+    documentId: string,
+    index: number
+  ): Promise<void> {
+    await db.runAsync(
+      "DELETE FROM document_chunks WHERE document_id = ? AND chunk_index = ?",
+      [documentId, index]
+    );
+  },
+
+  /**
+   * Shift all chunk indices down by a given offset for chunks after a given index.
+   * Used after deleting a chunk to keep indices sequential.
+   *
+   * Android equivalent: DocumentChunksDao.shiftIndicesDown()
+   */
+  async shiftIndicesDown(
+    db: SQLiteDatabase,
+    documentId: string,
+    afterIndex: number,
+    offset: number = 1
+  ): Promise<void> {
+    await db.runAsync(
+      "UPDATE document_chunks SET chunk_index = chunk_index - ? WHERE document_id = ? AND chunk_index > ?",
+      [offset, documentId, afterIndex]
+    );
+  },
+
+  /**
+   * Atomic reflow: delete all chunks from startIndex onward, then insert
+   * the new chunks — all wrapped in a single transaction. If the app
+   * crashes mid-operation, SQLite rolls everything back.
+   *
+   * Android equivalent: DocumentChunksDao.atomicReplace()
+   */
+  async atomicReplace(
+    db: SQLiteDatabase,
+    documentId: string,
+    startIndex: number,
+    newChunks: Omit<DocumentChunk, "id">[]
+  ): Promise<void> {
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+        "DELETE FROM document_chunks WHERE document_id = ? AND chunk_index >= ?",
+        [documentId, startIndex]
+      );
+      for (const chunk of newChunks) {
+        await db.runAsync(
+          `INSERT INTO document_chunks
+             (document_id, chunk_index, raw_content, clean_content, mapping_json, title, timestamp)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            chunk.documentId,
+            chunk.chunkIndex,
+            chunk.rawContent,
+            chunk.cleanContent,
+            chunk.mappingJson ?? "{}",
+            chunk.title ?? null,
+            chunk.timestamp,
+          ]
+        );
+      }
+    });
   },
 
   /**
