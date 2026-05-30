@@ -23,6 +23,7 @@ import { getBook, saveBook, deleteBook } from "../../src/lib/storage";
 import { aiSuggest, aiVoiceEdit, AIMode, AIVoiceStyle } from "../../src/lib/ai";
 import { confirmAction } from "../../src/lib/dialogs";
 import ExportSheet from "../../src/components/ExportSheet";
+import AIEditingPanel from "../../src/components/editor/AIEditingPanel";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -75,6 +76,7 @@ export default function EditorScreen() {
   const [voiceStyle, setVoiceStyle] = useState<AIVoiceStyle>("casual");
   const [voiceModelInfo, setVoiceModelInfo] = useState("");
 
+  const [showEditing, setShowEditing] = useState(false);
   const [showMeta, setShowMeta] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
@@ -275,6 +277,30 @@ export default function EditorScreen() {
     setShowVoiceEdit(false);
   };
 
+  // ─── AI Editing Panel handlers ───────────────────────────────────────
+
+  const handleEditingApplyFix = (original: string, replacement: string) => {
+    pushHistory(content);
+    // Replace first occurrence of the original text
+    const idx = content.indexOf(original);
+    if (idx >= 0) {
+      setContent(
+        content.slice(0, idx) + replacement + content.slice(idx + original.length)
+      );
+    }
+  };
+
+  const handleEditingReplaceAll = (newContent: string) => {
+    pushHistory(content);
+    setContent(newContent);
+  };
+
+  const handleEditingAppend = (text: string) => {
+    pushHistory(content);
+    const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n\n";
+    setContent(content + sep + "---\n\n" + text);
+  };
+
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
 
   if (!book) {
@@ -378,6 +404,16 @@ export default function EditorScreen() {
               style={styles.voiceEditBtn}
             >
               <Text style={styles.voiceEditBtnText}>🎭</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID="editing-panel-btn"
+              onPress={() => {
+                Keyboard.dismiss();
+                setShowEditing(true);
+              }}
+              style={styles.editingPanelBtn}
+            >
+              <Ionicons name="construct-outline" size={16} color={theme.textPrimary} />
             </TouchableOpacity>
           </View>
         </View>
@@ -644,6 +680,15 @@ export default function EditorScreen() {
         </Pressable>
       </Modal>
 
+      <AIEditingPanel
+        visible={showEditing}
+        content={content}
+        onApplyFix={handleEditingApplyFix}
+        onReplaceAll={handleEditingReplaceAll}
+        onAppendBelow={handleEditingAppend}
+        onClose={() => setShowEditing(false)}
+      />
+
       <ExportSheet
         visible={showExport}
         book={book ? { ...book, title, author, content, coverColor } : null}
@@ -814,6 +859,17 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   voiceEditBtnText: { fontSize: 16 },
+  editingPanelBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    marginLeft: 2,
+  },
 
   // ── Shared sheet styles ───────────────────────────────────────────────
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
