@@ -23,6 +23,8 @@ import { coverPalette, sampleBookContent, theme } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
 import { getBooks, saveBook, deleteBook } from "../../src/lib/storage";
 import { confirmAction } from "../../src/lib/dialogs";
+import EmptyState from "../../src/components/EmptyState";
+import BookCardSkeleton from "../../src/components/BookCardSkeleton";
 
 const { width } = Dimensions.get("window");
 const COL = 2;
@@ -41,6 +43,7 @@ function sanitize(s: string) {
 export default function LibraryScreen() {
   const router = useRouter();
   const [books, setBooks] = useState<Book[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -70,6 +73,7 @@ export default function LibraryScreen() {
     } else {
       setBooks(list);
     }
+    setLoading(false);
   }, []);
 
   useFocusEffect(
@@ -299,10 +303,21 @@ export default function LibraryScreen() {
           />
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>Your library is empty</Text>
-            <Text style={styles.emptySub}>Import a .txt or .md, or write something new.</Text>
-          </View>
+          loading ? (
+            <BookCardSkeleton count={4} />
+          ) : (
+            <EmptyState
+              testID="library-empty"
+              icon="library-outline"
+              title="Your library is empty"
+              subtitle="Import a .txt, .md, or .epub — or start writing something new."
+              action={{
+                label: "Create a book",
+                icon: "add",
+                onPress: () => setCreateOpen(true),
+              }}
+            />
+          )
         }
       />
 
