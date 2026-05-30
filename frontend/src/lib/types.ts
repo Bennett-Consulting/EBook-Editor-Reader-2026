@@ -111,6 +111,7 @@ export type BookFormat = "txt" | "md" | "epub";
 export interface Annotation {
   id: string;
   text: string;       // selected text
+  paraIndex?: number;  // paragraph index (for dedup — avoids duplicate-text bug)
   note?: string;      // user's note
   start: number;      // char index in content
   end: number;

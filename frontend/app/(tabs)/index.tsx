@@ -19,9 +19,12 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { coverPalette, sampleBookContent, theme } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
 import { getBooks, saveBook, deleteBook } from "../../src/lib/storage";
+
+const DEMO_SEEDED_KEY = "@ebook/demo-seeded";
 import { confirmAction } from "../../src/lib/dialogs";
 import EmptyState from "../../src/components/EmptyState";
 import BookCardSkeleton from "../../src/components/BookCardSkeleton";
@@ -36,8 +39,15 @@ function makeId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/**
+ * Strip HTML tags, control characters (C0/C1), and BOM from imported text.
+ * Fix: Previously only stripped null bytes; now catches all control chars.
+ */
 function sanitize(s: string) {
-  return s.replace(/<[^>]+>/g, "").replace(/\u0000/g, "").trim();
+  return s
+    .replace(/<[^>]+>/g, "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFEFF]/g, "")
+    .trim();
 }
 
 export default function LibraryScreen() {
@@ -53,23 +63,29 @@ export default function LibraryScreen() {
   const load = useCallback(async () => {
     const list = await getBooks();
     if (list.length === 0) {
-      // Seed with one demo book
-      const demo: Book = {
-        id: makeId(),
-        title: "The Quiet Room",
-        author: "M. Aren",
-        content: sampleBookContent,
-        format: "md",
-        coverColor: "#FFB000",
-        coverEmoji: "📖",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        progress: 0,
-        annotations: [],
-        isDraft: false,
-      };
-      setBooks([demo]);
-      await saveBook(demo);
+      // Seed with one demo book — but only once (don't re-seed after user deletes all)
+      const alreadySeeded = await AsyncStorage.getItem(DEMO_SEEDED_KEY);
+      if (!alreadySeeded) {
+        const demo: Book = {
+          id: makeId(),
+          title: "The Quiet Room",
+          author: "M. Aren",
+          content: sampleBookContent,
+          format: "md",
+          coverColor: "#FFB000",
+          coverEmoji: "📖",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          progress: 0,
+          annotations: [],
+          isDraft: false,
+        };
+        setBooks([demo]);
+        await saveBook(demo);
+        await AsyncStorage.setItem(DEMO_SEEDED_KEY, "1");
+      } else {
+        setBooks([]);
+      }
     } else {
       setBooks(list);
     }

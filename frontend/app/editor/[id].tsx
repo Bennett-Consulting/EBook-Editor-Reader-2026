@@ -1,4 +1,15 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+/**
+ * Editor Screen — Write, format, and AI-assist your manuscript.
+ *
+ * Modularized: hooks and toolbar extracted to black-box modules:
+ *   - useEditorHistory   — debounced undo/redo (fixes keystroke-per-undo bug)
+ *   - usePersistence     — auto-save with initial-load guard
+ *   - EditorToolbar      — floating formatting bar
+ *   - AIEditingPanel     — spell/grammar/tone panel
+ *   - ExportSheet        — PDF/EPUB/DOCX export
+ */
+
+import React, { useRef, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -18,12 +29,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { theme, coverPalette } from "../../src/lib/theme";
-import { Book } from "../../src/lib/types";
-import { getBook, saveBook, deleteBook } from "../../src/lib/storage";
-import { aiSuggest, aiVoiceEdit, AIMode, AIVoiceStyle } from "../../src/lib/ai";
+import { AIMode, AIVoiceStyle, aiSuggest, aiVoiceEdit } from "../../src/lib/ai";
+import { deleteBook } from "../../src/lib/storage";
 import { confirmAction } from "../../src/lib/dialogs";
 import ExportSheet from "../../src/components/ExportSheet";
-import AIEditingPanel from "../../src/components/editor/AIEditingPanel";
+import EditorToolbar from "../../src/components/editor/EditorToolbar";
+import { useEditorHistory } from "../../src/hooks/editor/useEditorHistory";
+import { usePersistence } from "../../src/hooks/editor/usePersistence";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -56,11 +68,21 @@ export default function EditorScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
-  const [book, setBook] = useState<Book | null>(null);
-  const [title, setTitle] = useState("");
-  const [author, setAuthor] = useState("");
-  const [content, setContent] = useState("");
-  const [coverColor, setCoverColor] = useState(coverPalette[0]);
+  // ── Persistence (auto-save with initial-load guard) ───────────────────
+  const {
+    book,
+    title,
+    author,
+    content,
+    coverColor,
+    setTitle,
+    setAuthor,
+    setContent,
+    setCoverColor,
+  } = usePersistence(String(id));
+
+  // ── History (debounced undo/redo) ─────────────────────────────────────
+  const history = useEditorHistory(content);
 
   // AI Assist state
   const [showAI, setShowAI] = useState(false);
@@ -79,127 +101,76 @@ export default function EditorScreen() {
   const [showEditing, setShowEditing] = useState(false);
   const [showMeta, setShowMeta] = useState(false);
   const [showExport, setShowExport] = useState(false);
-  const [history, setHistory] = useState<string[]>([]);
-  const [redoStack, setRedoStack] = useState<string[]>([]);
+
   const inputRef = useRef<TextInput>(null);
   const selectionRef = useRef({ start: 0, end: 0 });
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      const b = await getBook(String(id));
-      if (b) {
-        setBook(b);
-        setTitle(b.title);
-        setAuthor(b.author);
-        setContent(b.content);
-        setCoverColor(b.coverColor);
+  // ── Content editing ───────────────────────────────────────────────────
+
+  const onChangeContent = useCallback(
+    (text: string) => {
+      if (text !== content) {
+        history.recordChange(content, text);
+        setContent(text);
       }
-    })();
-  }, [id]);
-
-  const persist = useCallback(
-    (next: Partial<Book>) => {
-      if (!book) return;
-      const merged: Book = {
-        ...book,
-        title: title,
-        author: author,
-        content: content,
-        coverColor: coverColor,
-        ...next,
-      };
-      setBook(merged);
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => saveBook(merged), 400);
     },
-    [book, title, author, content, coverColor]
+    [content, history, setContent]
   );
 
-  useEffect(() => {
-    if (book) persist({});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, author, content, coverColor]);
+  const handleUndo = useCallback(() => {
+    const restored = history.undo(content);
+    if (restored !== null) setContent(restored);
+  }, [content, history, setContent]);
 
-  const pushHistory = (prev: string) => {
-    setHistory((h) => [...h.slice(-49), prev]);
-    setRedoStack([]);
-  };
+  const handleRedo = useCallback(() => {
+    const restored = history.redo(content);
+    if (restored !== null) setContent(restored);
+  }, [content, history, setContent]);
 
-  const onChangeContent = (text: string) => {
-    if (text !== content) {
-      pushHistory(content);
-      setContent(text);
-    }
-  };
-
-  const undo = () => {
-    if (history.length === 0) return;
-    const prev = history[history.length - 1];
-    setHistory((h) => h.slice(0, -1));
-    setRedoStack((r) => [...r, content]);
-    setContent(prev);
-  };
-
-  const redo = () => {
-    if (redoStack.length === 0) return;
-    const next = redoStack[redoStack.length - 1];
-    setRedoStack((r) => r.slice(0, -1));
-    setHistory((h) => [...h, content]);
-    setContent(next);
-  };
-
-  const insertAtCursor = (insertion: string, wrap?: { left: string; right: string }) => {
-    const { start, end } = selectionRef.current;
-    pushHistory(content);
-    let next: string;
-    let newPos: number;
-    if (wrap && start !== end) {
-      const selected = content.slice(start, end);
-      next =
-        content.slice(0, start) + wrap.left + selected + wrap.right + content.slice(end);
-      newPos = end + wrap.left.length + wrap.right.length;
-    } else if (wrap) {
-      next = content.slice(0, start) + wrap.left + wrap.right + content.slice(end);
-      newPos = start + wrap.left.length;
-    } else {
-      next = content.slice(0, start) + insertion + content.slice(end);
-      newPos = start + insertion.length;
-    }
-    setContent(next);
-    setTimeout(() => {
-      inputRef.current?.setNativeProps?.({ selection: { start: newPos, end: newPos } });
-    }, 30);
-  };
+  const insertAtCursor = useCallback(
+    (insertion: string, wrap?: { left: string; right: string }) => {
+      const { start, end } = selectionRef.current;
+      history.pushImmediate(content);
+      let next: string;
+      let newPos: number;
+      if (wrap && start !== end) {
+        const selected = content.slice(start, end);
+        next = content.slice(0, start) + wrap.left + selected + wrap.right + content.slice(end);
+        newPos = end + wrap.left.length + wrap.right.length;
+      } else if (wrap) {
+        next = content.slice(0, start) + wrap.left + wrap.right + content.slice(end);
+        newPos = start + wrap.left.length;
+      } else {
+        next = content.slice(0, start) + insertion + content.slice(end);
+        newPos = start + insertion.length;
+      }
+      setContent(next);
+      setTimeout(() => {
+        inputRef.current?.setNativeProps?.({ selection: { start: newPos, end: newPos } });
+      }, 30);
+    },
+    [content, history, setContent]
+  );
 
   const formatBold = () => insertAtCursor("", { left: "**", right: "**" });
   const formatItalic = () => insertAtCursor("", { left: "_", right: "_" });
-  const formatHeading = () => {
-    const { start } = selectionRef.current;
-    const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-    pushHistory(content);
-    setContent(content.slice(0, lineStart) + "## " + content.slice(lineStart));
-  };
-  const formatBullet = () => {
-    const { start } = selectionRef.current;
-    const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-    pushHistory(content);
-    setContent(content.slice(0, lineStart) + "- " + content.slice(lineStart));
-  };
-  const formatNumber = () => {
-    const { start } = selectionRef.current;
-    const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-    pushHistory(content);
-    setContent(content.slice(0, lineStart) + "1. " + content.slice(lineStart));
-  };
-  const formatQuote = () => {
-    const { start } = selectionRef.current;
-    const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-    pushHistory(content);
-    setContent(content.slice(0, lineStart) + "> " + content.slice(lineStart));
-  };
 
-  // ─── AI Assist ──────────────────────────────────────────────────────────
+  const formatAtLineStart = useCallback(
+    (prefix: string) => {
+      const { start } = selectionRef.current;
+      const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+      history.pushImmediate(content);
+      setContent(content.slice(0, lineStart) + prefix + content.slice(lineStart));
+    },
+    [content, history, setContent]
+  );
+
+  const formatHeading = () => formatAtLineStart("## ");
+  const formatBullet = () => formatAtLineStart("- ");
+  const formatNumber = () => formatAtLineStart("1. ");
+  const formatQuote = () => formatAtLineStart("> ");
+
+  // ── AI Assist ─────────────────────────────────────────────────────────
 
   const askAI = async (mode: AIMode) => {
     if (!content.trim()) {
@@ -226,13 +197,13 @@ export default function EditorScreen() {
 
   const acceptAI = () => {
     if (!aiSuggestion) return;
-    pushHistory(content);
+    history.pushImmediate(content);
     const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n\n";
     setContent(content + sep + aiSuggestion);
     setShowAI(false);
   };
 
-  // ─── Voice Edit ─────────────────────────────────────────────────────────
+  // ── Voice Edit ────────────────────────────────────────────────────────
 
   const runVoiceEdit = async (style: AIVoiceStyle) => {
     if (!content.trim()) {
@@ -246,12 +217,8 @@ export default function EditorScreen() {
     setVoiceResult("");
     setVoiceModelInfo("");
     try {
-      // Voice edit processes the full content (up to a reasonable limit).
-      // Theatrical especially needs the whole chapter for a complete script.
       const maxInput = style === "theatrical" ? 8000 : 4000;
-      const inputText =
-        content.length > maxInput ? content.slice(0, maxInput) : content;
-
+      const inputText = content.length > maxInput ? content.slice(0, maxInput) : content;
       const res = await aiVoiceEdit(inputText, style, book?.id);
       setVoiceResult(res.suggestion);
       setVoiceModelInfo(`${res.provider} · ${res.model}`);
@@ -264,39 +231,36 @@ export default function EditorScreen() {
 
   const acceptVoiceEdit = () => {
     if (!voiceResult) return;
-    pushHistory(content);
+    history.pushImmediate(content);
     setContent(voiceResult);
     setShowVoiceEdit(false);
   };
 
   const appendVoiceEdit = () => {
     if (!voiceResult) return;
-    pushHistory(content);
+    history.pushImmediate(content);
     const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n\n";
     setContent(content + sep + "---\n\n" + voiceResult);
     setShowVoiceEdit(false);
   };
 
-  // ─── AI Editing Panel handlers ───────────────────────────────────────
+  // ── AI Editing Panel handlers ─────────────────────────────────────────
 
   const handleEditingApplyFix = (original: string, replacement: string) => {
-    pushHistory(content);
-    // Replace first occurrence of the original text
+    history.pushImmediate(content);
     const idx = content.indexOf(original);
     if (idx >= 0) {
-      setContent(
-        content.slice(0, idx) + replacement + content.slice(idx + original.length)
-      );
+      setContent(content.slice(0, idx) + replacement + content.slice(idx + original.length));
     }
   };
 
   const handleEditingReplaceAll = (newContent: string) => {
-    pushHistory(content);
+    history.pushImmediate(content);
     setContent(newContent);
   };
 
   const handleEditingAppend = (text: string) => {
-    pushHistory(content);
+    history.pushImmediate(content);
     const sep = content.endsWith("\n") || content.length === 0 ? "" : "\n\n";
     setContent(content + sep + "---\n\n" + text);
   };
@@ -375,53 +339,30 @@ export default function EditorScreen() {
         </ScrollView>
 
         {/* Floating Toolbar */}
-        <View style={styles.toolbar} pointerEvents="box-none">
-          <View style={styles.toolbarInner}>
-            <ToolBtn icon="arrow-undo" onPress={undo} disabled={!history.length} testID="tb-undo" />
-            <ToolBtn icon="arrow-redo" onPress={redo} disabled={!redoStack.length} testID="tb-redo" />
-            <View style={styles.tbSep} />
-            <ToolText label="B" bold onPress={formatBold} testID="tb-bold" />
-            <ToolText label="i" italic onPress={formatItalic} testID="tb-italic" />
-            <ToolText label="H" onPress={formatHeading} testID="tb-heading" />
-            <ToolBtn icon="list" onPress={formatBullet} testID="tb-bullet" />
-            <ToolBtn icon="list-outline" onPress={formatNumber} testID="tb-numlist" />
-            <ToolBtn icon="chatbox-outline" onPress={formatQuote} testID="tb-quote" />
-            <View style={styles.tbSep} />
-            <TouchableOpacity
-              testID="ai-btn"
-              onPress={() => askAI("continue")}
-              style={styles.aiBtn}
-            >
-              <Ionicons name="sparkles" size={16} color="#0A0A0B" />
-              <Text style={styles.aiBtnText}>AI</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              testID="voice-edit-btn"
-              onPress={() => {
-                Keyboard.dismiss();
-                setShowVoiceEdit(true);
-              }}
-              style={styles.voiceEditBtn}
-            >
-              <Text style={styles.voiceEditBtnText}>🎭</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              testID="editing-panel-btn"
-              onPress={() => {
-                Keyboard.dismiss();
-                setShowEditing(true);
-              }}
-              style={styles.editingPanelBtn}
-            >
-              <Ionicons name="construct-outline" size={16} color={theme.textPrimary} />
-            </TouchableOpacity>
-          </View>
-        </View>
+        <EditorToolbar
+          canUndo={history.canUndo}
+          canRedo={history.canRedo}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          onBold={formatBold}
+          onItalic={formatItalic}
+          onHeading={formatHeading}
+          onBullet={formatBullet}
+          onNumberList={formatNumber}
+          onQuote={formatQuote}
+          onAI={() => askAI("continue")}
+          onVoiceEdit={() => {
+            Keyboard.dismiss();
+            setShowVoiceEdit(true);
+          }}
+          onEditingPanel={() => {
+            Keyboard.dismiss();
+            setShowEditing(true);
+          }}
+        />
       </KeyboardAvoidingView>
 
-      {/* ═══════════════════════════════════════════════════════════════════
-          AI ASSIST DRAWER
-          ═══════════════════════════════════════════════════════════════════ */}
+      {/* ═══ AI ASSIST DRAWER ═══ */}
       <Modal visible={showAI} transparent animationType="slide" onRequestClose={() => setShowAI(false)}>
         <Pressable style={styles.backdrop} onPress={() => setShowAI(false)}>
           <Pressable style={styles.aiSheet}>
@@ -429,9 +370,7 @@ export default function EditorScreen() {
             <View style={styles.aiHeader}>
               <Ionicons name="sparkles" size={18} color={theme.brand} />
               <Text style={styles.aiTitle}>AI Assist</Text>
-              {aiModelInfo ? (
-                <Text style={styles.modelBadge}>{aiModelInfo}</Text>
-              ) : null}
+              {aiModelInfo ? <Text style={styles.modelBadge}>{aiModelInfo}</Text> : null}
             </View>
             <View style={styles.aiModes}>
               {AI_ASSIST_MODES.map((m) => (
@@ -460,9 +399,7 @@ export default function EditorScreen() {
               {aiLoading ? (
                 <View style={{ alignItems: "center", paddingVertical: 28 }}>
                   <ActivityIndicator color={theme.brand} />
-                  <Text style={{ color: theme.textSecondary, marginTop: 12 }}>
-                    Thinking…
-                  </Text>
+                  <Text style={{ color: theme.textSecondary, marginTop: 12 }}>Thinking…</Text>
                 </View>
               ) : (
                 <Text style={styles.aiText}>
@@ -495,9 +432,7 @@ export default function EditorScreen() {
         </Pressable>
       </Modal>
 
-      {/* ═══════════════════════════════════════════════════════════════════
-          VOICE EDIT DRAWER
-          ═══════════════════════════════════════════════════════════════════ */}
+      {/* ═══ VOICE EDIT DRAWER ═══ */}
       <Modal
         visible={showVoiceEdit}
         transparent
@@ -507,20 +442,14 @@ export default function EditorScreen() {
         <Pressable style={styles.backdrop} onPress={() => setShowVoiceEdit(false)}>
           <Pressable style={styles.voiceSheet}>
             <View style={styles.handle} />
-
-            {/* Header */}
             <View style={styles.aiHeader}>
               <Text style={{ fontSize: 18 }}>🎭</Text>
               <Text style={styles.aiTitle}>Voice Edit</Text>
-              {voiceModelInfo ? (
-                <Text style={styles.modelBadge}>{voiceModelInfo}</Text>
-              ) : null}
+              {voiceModelInfo ? <Text style={styles.modelBadge}>{voiceModelInfo}</Text> : null}
             </View>
             <Text style={styles.voiceSubtitle}>
               Rewrite your text in a different voice. Undo any time.
             </Text>
-
-            {/* Style Selector */}
             <View style={styles.voiceStyleGrid}>
               {VOICE_STYLES.map((vs) => (
                 <TouchableOpacity
@@ -543,8 +472,6 @@ export default function EditorScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-
-            {/* Result */}
             {(voiceLoading || voiceResult) ? (
               <ScrollView style={styles.voiceResultBox}>
                 {voiceLoading ? (
@@ -557,14 +484,10 @@ export default function EditorScreen() {
                     </Text>
                   </View>
                 ) : (
-                  <Text style={styles.aiText} selectable>
-                    {voiceResult}
-                  </Text>
+                  <Text style={styles.aiText} selectable>{voiceResult}</Text>
                 )}
               </ScrollView>
             ) : null}
-
-            {/* Actions */}
             {voiceResult && !voiceLoading ? (
               <View style={{ gap: 8 }}>
                 <View style={{ flexDirection: "row", gap: 10 }}>
@@ -591,9 +514,7 @@ export default function EditorScreen() {
                     onPress={appendVoiceEdit}
                     style={[styles.btn, styles.btnGhost]}
                   >
-                    <Text style={styles.btnGhostText}>
-                      Append script below original
-                    </Text>
+                    <Text style={styles.btnGhostText}>Append script below original</Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
@@ -609,7 +530,7 @@ export default function EditorScreen() {
         </Pressable>
       </Modal>
 
-      {/* Meta sheet */}
+      {/* ═══ META / COVER SHEET ═══ */}
       <Modal visible={showMeta} transparent animationType="slide" onRequestClose={() => setShowMeta(false)}>
         <Pressable style={styles.backdrop} onPress={() => setShowMeta(false)}>
           <Pressable style={styles.aiSheet}>
@@ -628,10 +549,7 @@ export default function EditorScreen() {
                   onPress={() => setCoverColor(c)}
                   style={[
                     styles.swatch,
-                    {
-                      backgroundColor: c,
-                      borderColor: coverColor === c ? theme.brand : "transparent",
-                    },
+                    { backgroundColor: c, borderColor: coverColor === c ? theme.brand : "transparent" },
                   ]}
                 />
               ))}
@@ -698,60 +616,6 @@ export default function EditorScreen() {
   );
 }
 
-// ─── Tool Buttons ───────────────────────────────────────────────────────────
-
-function ToolBtn({
-  icon,
-  onPress,
-  disabled,
-  testID,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-  disabled?: boolean;
-  testID?: string;
-}) {
-  return (
-    <TouchableOpacity
-      testID={testID}
-      onPress={onPress}
-      disabled={disabled}
-      style={[styles.tbBtn, disabled && { opacity: 0.35 }]}
-    >
-      <Ionicons name={icon} size={18} color={theme.textPrimary} />
-    </TouchableOpacity>
-  );
-}
-
-function ToolText({
-  label,
-  bold,
-  italic,
-  onPress,
-  testID,
-}: {
-  label: string;
-  bold?: boolean;
-  italic?: boolean;
-  onPress: () => void;
-  testID?: string;
-}) {
-  return (
-    <TouchableOpacity testID={testID} onPress={onPress} style={styles.tbBtn}>
-      <Text
-        style={{
-          color: theme.textPrimary,
-          fontWeight: bold ? "800" : "600",
-          fontStyle: italic ? "italic" : "normal",
-          fontSize: 15,
-        }}
-      >
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -787,11 +651,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     paddingVertical: 4,
   },
-  divider: {
-    height: 1,
-    backgroundColor: theme.border,
-    marginVertical: 18,
-  },
+  divider: { height: 1, backgroundColor: theme.border, marginVertical: 18 },
   contentInput: {
     color: theme.reading,
     fontSize: 17,
@@ -800,78 +660,7 @@ const styles = StyleSheet.create({
     fontFamily: Platform.select({ ios: "Georgia", default: "serif" }),
   },
 
-  // ── Floating Toolbar ──────────────────────────────────────────────────
-  toolbar: {
-    position: "absolute",
-    bottom: 16,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-  },
-  toolbarInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(28,28,30,0.96)",
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 28,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    gap: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 12,
-  },
-  tbBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tbSep: {
-    width: 1,
-    height: 22,
-    backgroundColor: theme.border,
-    marginHorizontal: 4,
-  },
-  aiBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: theme.brand,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 18,
-    marginLeft: 4,
-  },
-  aiBtnText: { color: "#0A0A0B", fontWeight: "800", fontSize: 13 },
-  voiceEditBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    marginLeft: 2,
-  },
-  voiceEditBtnText: { fontSize: 16 },
-  editingPanelBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    marginLeft: 2,
-  },
-
-  // ── Shared sheet styles ───────────────────────────────────────────────
+  // Shared sheet styles
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   aiSheet: {
     backgroundColor: theme.surface,
@@ -893,11 +682,7 @@ const styles = StyleSheet.create({
   },
   aiHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 },
   aiTitle: { color: theme.textPrimary, fontSize: 18, fontWeight: "600" },
-  modelBadge: {
-    color: theme.textTertiary,
-    fontSize: 11,
-    fontFamily: "monospace",
-  },
+  modelBadge: { color: theme.textTertiary, fontSize: 11, fontFamily: "monospace" },
   aiModes: { flexDirection: "row", gap: 8, marginBottom: 14, flexWrap: "wrap" },
   aiChip: {
     paddingHorizontal: 14,
@@ -919,7 +704,7 @@ const styles = StyleSheet.create({
   },
   aiText: { color: theme.textPrimary, fontSize: 15, lineHeight: 22 },
 
-  // ── Voice Edit sheet ──────────────────────────────────────────────────
+  // Voice Edit
   voiceSheet: {
     backgroundColor: theme.surface,
     borderTopLeftRadius: 24,
@@ -930,16 +715,8 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
     maxHeight: "92%",
   },
-  voiceSubtitle: {
-    color: theme.textSecondary,
-    fontSize: 13,
-    marginBottom: 14,
-    marginTop: -4,
-  },
-  voiceStyleGrid: {
-    gap: 10,
-    marginBottom: 14,
-  },
+  voiceSubtitle: { color: theme.textSecondary, fontSize: 13, marginBottom: 14, marginTop: -4 },
+  voiceStyleGrid: { gap: 10, marginBottom: 14 },
   voiceCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -951,18 +728,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   voiceCardIcon: { fontSize: 26 },
-  voiceCardLabel: {
-    color: theme.textPrimary,
-    fontWeight: "700",
-    fontSize: 15,
-    minWidth: 90,
-  },
-  voiceCardDesc: {
-    color: theme.textSecondary,
-    fontSize: 12,
-    flex: 1,
-    lineHeight: 16,
-  },
+  voiceCardLabel: { color: theme.textPrimary, fontWeight: "700", fontSize: 15, minWidth: 90 },
+  voiceCardDesc: { color: theme.textSecondary, fontSize: 12, flex: 1, lineHeight: 16 },
   voiceResultBox: {
     backgroundColor: theme.surfaceHi,
     borderRadius: 14,
@@ -974,7 +741,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
 
-  // ── Cover / Meta ──────────────────────────────────────────────────────
+  // Cover / Meta
   coverPreview: {
     width: "100%",
     aspectRatio: 1.6,
@@ -985,15 +752,9 @@ const styles = StyleSheet.create({
   },
   coverPreviewEmoji: { fontSize: 32 },
   coverPreviewTitle: { color: "#0A0A0B", fontSize: 22, fontWeight: "800", letterSpacing: -0.5 },
-  swatch: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    marginRight: 10,
-    borderWidth: 2,
-  },
+  swatch: { width: 38, height: 38, borderRadius: 19, marginRight: 10, borderWidth: 2 },
 
-  // ── Buttons ───────────────────────────────────────────────────────────
+  // Buttons
   btn: {
     paddingVertical: 13,
     borderRadius: 12,
@@ -1005,6 +766,10 @@ const styles = StyleSheet.create({
   btnPrimaryText: { color: "#0A0A0B", fontWeight: "700", fontSize: 15 },
   btnGhost: { backgroundColor: theme.surfaceHi, borderWidth: 1, borderColor: theme.border },
   btnGhostText: { color: theme.textPrimary, fontWeight: "600", fontSize: 15 },
-  btnDanger: { backgroundColor: "rgba(255,107,107,0.10)", borderWidth: 1, borderColor: "rgba(255,107,107,0.35)" },
+  btnDanger: {
+    backgroundColor: "rgba(255,107,107,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(255,107,107,0.35)",
+  },
   btnDangerText: { color: "#ff6b6b", fontWeight: "600", fontSize: 15 },
 });
