@@ -388,8 +388,8 @@ export default function ReaderScreen() {
                             ? "rgba(255,176,0,0.4)"
                             : "rgba(255,176,0,0.15)"
                           : highlighted
-                          ? theme.highlight
-                          : "transparent",
+                            ? theme.highlight
+                            : "transparent",
                         paddingHorizontal: highlighted || searchHL ? 4 : 0,
                         borderRadius: highlighted || searchHL ? 4 : 0,
                       },
