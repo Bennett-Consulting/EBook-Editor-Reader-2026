@@ -21,7 +21,7 @@ import {
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
+import { File } from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "../lib/theme";
 import { SavedAIKey } from "../lib/types";
@@ -142,7 +142,8 @@ export default function AIProviderSettings() {
         copyToCacheDirectory: true,
       });
       if (res.canceled || !res.assets?.[0]) return;
-      const text = await FileSystem.readAsStringAsync(res.assets[0].uri);
+      const file = new File(res.assets[0].uri);
+      const text = await file.text();
       const key = text.trim().split(/\s+/)[0];
       if (key) setNewKeyText(key);
       else Alert.alert("Empty file", "The file didn't contain a key.");

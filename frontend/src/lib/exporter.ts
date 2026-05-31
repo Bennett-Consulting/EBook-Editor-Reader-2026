@@ -1,4 +1,4 @@
-import * as FileSystem from "expo-file-system";
+import { Paths, File } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import * as Print from "expo-print";
 import { Alert, Platform } from "react-native";
@@ -479,20 +479,21 @@ export async function exportBook(
 
   // ---------- NATIVE (Android / iOS) ----------
   try {
-    const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+    const dir = Paths.cache ?? Paths.document;
     if (!dir) throw new Error("No writable directory available");
-    let uri = `${dir}${filename}`;
+    const file = new File(dir, filename);
+    let uri = file.uri;
     let mime = "text/plain";
 
     if (format === "epub") {
       onProgress?.("Building EPUB…");
       const base64 = await buildEpub(book, false) as string;
-      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+      file.write(base64, { encoding: "base64" });
       mime = "application/epub+zip";
     } else if (format === "docx") {
       onProgress?.("Building Word document…");
       const base64 = await buildDocx(book, false) as string;
-      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+      file.write(base64, { encoding: "base64" });
       mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     } else if (format === "pdf") {
       onProgress?.("Generating PDF…");
@@ -503,7 +504,7 @@ export async function exportBook(
     } else {
       onProgress?.("Writing text…");
       const text = buildPlainText(book, format);
-      await FileSystem.writeAsStringAsync(uri, text);
+      file.write(text);
       mime = format === "md" ? "text/markdown" : "text/plain";
     }
 

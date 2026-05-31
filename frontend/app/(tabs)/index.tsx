@@ -18,7 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
+import { File } from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { coverPalette, sampleBookContent, theme } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
@@ -154,7 +154,8 @@ export default function LibraryScreen() {
         }
       } else {
         try {
-          content = await FileSystem.readAsStringAsync(asset.uri);
+          const file = new File(asset.uri);
+          content = await file.text();
         } catch (e) {
           // Web: fetch it
           const r = await fetch(asset.uri);

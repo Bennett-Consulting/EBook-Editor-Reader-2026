@@ -33,6 +33,7 @@ import { AIMode, AIVoiceStyle, aiSuggest, aiVoiceEdit } from "../../src/lib/ai";
 import { deleteBook } from "../../src/lib/storage";
 import { confirmAction } from "../../src/lib/dialogs";
 import ExportSheet from "../../src/components/ExportSheet";
+import AIEditingPanel from "../../src/components/editor/AIEditingPanel";
 import EditorToolbar from "../../src/components/editor/EditorToolbar";
 import { useEditorHistory } from "../../src/hooks/editor/useEditorHistory";
 import { usePersistence } from "../../src/hooks/editor/usePersistence";

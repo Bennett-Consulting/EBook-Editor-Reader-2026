@@ -4,7 +4,7 @@
  * EPUB files are ZIP archives containing XHTML chapters.
  * Uses JSZip (already installed) to unzip and parse.
  */
-import { File } from "expo-file-system/next";
+import * as FileSystem from "expo-file-system";
 import JSZip from "jszip";
 import { Platform } from "react-native";
 
@@ -20,18 +20,22 @@ export interface ParsedEpub {
  * @returns Parsed book metadata and content
  */
 export async function parseEpub(uri: string): Promise<ParsedEpub> {
-  let zipData: ArrayBuffer;
+  let zipData: string | ArrayBuffer;
 
   if (Platform.OS === "web") {
+    // On web, fetch as ArrayBuffer
     const resp = await fetch(uri);
     zipData = await resp.arrayBuffer();
   } else {
-    const file = new File(uri);
-    const bytes = await file.bytes();
-    zipData = bytes.buffer as ArrayBuffer;
+    // On native, read as base64
+    zipData = await FileSystem.readAsStringAsync(uri, {
+      encoding: "base64" as any,
+    });
   }
 
-  const zip = await JSZip.loadAsync(zipData);
+  const zip = await JSZip.loadAsync(zipData, {
+    base64: Platform.OS !== "web",
+  });
 
   // 1. Find content.opf via container.xml
   const containerXml = await zip.file("META-INF/container.xml")?.async("text");
