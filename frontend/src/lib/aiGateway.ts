@@ -192,11 +192,11 @@ export function pickBestModel(models: AIModel[], task: TaskType): AIModel | null
     expand: ["pro", "flagship", "standard"],
   };
 
-  const preferred = tierPreference[task];
-  for (const tier of preferred) {
-    const match = models.find((m) => m.tier === tier);
-    if (match) return match;
-  }
+  const preferred = tierPreference[task] || ["standard", "flash", "pro", "flagship"];
+for (const tier of preferred) {
+  const match = models.find((m) => m.tier === tier);
+  if (match) return match;
+}
   return models[0];
 }
 

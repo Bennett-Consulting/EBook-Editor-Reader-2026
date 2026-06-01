@@ -51,9 +51,10 @@ describe('AI Gateway Resilience', () => {
       expect(pickBestModel(models, 'improve')?.tier).toBe('pro');
     });
 
-    it('crashes on unknown task - BUG', () => {
-      // KNOWN BUG: pickBestModel crashes when task not in tierPreference
-      expect(() => pickBestModel(models, 'unknown' as any)).toThrow();
+    it('handles unknown task gracefully', () => {
+      const result = pickBestModel(models, 'unknown' as any);
+      expect(result).toBeDefined();
+      expect(result?.tier).toBe('standard');
     });
   });
 
