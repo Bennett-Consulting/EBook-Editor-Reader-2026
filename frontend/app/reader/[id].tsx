@@ -143,6 +143,17 @@ export default function ReaderScreen() {
     return text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   }, [pages, currentPage, paragraphs]);
 
+  // Global paragraph index at the start of the current page — used so
+  // annotation/highlight lookups use the correct global index, not local page index.
+  const pageParaOffset = useMemo(() => {
+    if (!pages) return 0;
+    let count = 0;
+    for (let i = 0; i < currentPage; i++) {
+      count += pages[i].split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).length;
+    }
+    return count;
+  }, [pages, currentPage]);
+
   // ── Annotations hook (index-based, fixes duplicate bug) ───────────────
 
   const annotations = useAnnotations(book, setBook, paragraphs);
@@ -172,6 +183,7 @@ export default function ReaderScreen() {
       if (!pages || idx < 0 || idx >= pages.length || !book) return;
       setCurrentPage(idx);
       scrollRef.current?.scrollTo({ y: 0, animated: false });
+      paraOffsetsRef.current = [];
       const progress = (idx + 1) / pages.length;
       const updated = { ...book, scrollY: idx, progress };
       saveBook(updated);
@@ -382,19 +394,20 @@ export default function ReaderScreen() {
           )}
 
           {currentPageParagraphs.map((p, i) => {
-            const highlighted = annotations.isHighlighted(i, p);
-            const ann = annotations.annotationFor(i, p);
+            const globalIdx = pageParaOffset + i;
+            const highlighted = annotations.isHighlighted(globalIdx, p);
+            const ann = annotations.annotationFor(globalIdx, p);
             const isHeading = /^#{1,3}\s/.test(p) || /^chapter\s/i.test(p);
-            const searchHL = getSearchHighlight(i);
+            const searchHL = getSearchHighlight(globalIdx);
 
             return (
               <Pressable
-                key={i}
-                testID={`para-${i}`}
-                onLongPress={() => openHighlightModal(i, p)}
+                key={globalIdx}
+                testID={`para-${globalIdx}`}
+                onLongPress={() => openHighlightModal(globalIdx, p)}
                 delayLongPress={300}
                 onLayout={(e) => {
-                  paraOffsetsRef.current[i] = e.nativeEvent.layout.y;
+                  paraOffsetsRef.current[globalIdx] = e.nativeEvent.layout.y;
                 }}
               >
                 {isHeading ? (
