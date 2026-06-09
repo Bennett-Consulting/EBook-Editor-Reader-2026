@@ -1,5 +1,5 @@
 /**
- * EPUB Parser — extracts text content from .epub files.
+ * EPUB Parser — extracts structured chapters from .epub files.
  *
  * EPUB files are ZIP archives containing XHTML chapters.
  * Uses JSZip (already installed) to unzip and parse.
@@ -8,48 +8,59 @@ import * as FileSystem from "expo-file-system";
 import JSZip from "jszip";
 import { Platform } from "react-native";
 
-export interface ParsedEpub {
+export interface EpubChapter {
   title: string;
-  author: string;
   content: string;
 }
 
+export interface ParsedEpub {
+  title: string;
+  author: string;
+  chapters: EpubChapter[];
+  content: string; // all chapters joined — backward compat with Book.content
+}
+
 /**
- * Parse an EPUB file and extract its text content.
+ * Parse an EPUB file and extract structured chapters.
  * @param uri - file URI (from DocumentPicker or FileSystem)
- * @returns Parsed book metadata and content
  */
 export async function parseEpub(uri: string): Promise<ParsedEpub> {
   let zipData: string | ArrayBuffer;
 
   if (Platform.OS === "web") {
-    // On web, fetch as ArrayBuffer
     const resp = await fetch(uri);
     zipData = await resp.arrayBuffer();
   } else {
-    // On native, read as base64
-    zipData = await FileSystem.readAsStringAsync(uri, {
-      encoding: "base64" as any,
+    zipData = await (FileSystem as any).readAsStringAsync(uri, {
+      encoding: "base64",
     });
   }
 
-  const zip = await JSZip.loadAsync(zipData, {
-    base64: Platform.OS !== "web",
-  });
+  return parseEpubData(zipData, Platform.OS === "web" ? "arraybuffer" : "base64");
+}
+
+/**
+ * Parse EPUB from raw data — exposed for testing without file I/O.
+ */
+export async function parseEpubData(
+  data: string | ArrayBuffer,
+  encoding: "base64" | "arraybuffer"
+): Promise<ParsedEpub> {
+  const zip = await JSZip.loadAsync(data, { base64: encoding === "base64" });
 
   // 1. Find content.opf via container.xml
   const containerXml = await zip.file("META-INF/container.xml")?.async("text");
-  if (!containerXml) throw new Error("Invalid EPUB: missing container.xml");
+  if (!containerXml) throw new Error("Invalid EPUB: missing META-INF/container.xml");
 
   const opfMatch = containerXml.match(/full-path="([^"]+)"/);
-  if (!opfMatch) throw new Error("Invalid EPUB: no rootfile path");
+  if (!opfMatch) throw new Error("Invalid EPUB: no rootfile path in container.xml");
   const opfPath = opfMatch[1];
   const opfDir = opfPath.includes("/")
     ? opfPath.substring(0, opfPath.lastIndexOf("/") + 1)
     : "";
 
   const opfXml = await zip.file(opfPath)?.async("text");
-  if (!opfXml) throw new Error("Invalid EPUB: missing content.opf");
+  if (!opfXml) throw new Error(`Invalid EPUB: missing OPF at ${opfPath}`);
 
   // 2. Extract metadata
   const titleMatch = opfXml.match(/<dc:title[^>]*>([^<]+)<\/dc:title>/);
@@ -57,23 +68,17 @@ export async function parseEpub(uri: string): Promise<ParsedEpub> {
   const title = decodeEntities(titleMatch?.[1] || "Untitled");
   const author = decodeEntities(authorMatch?.[1] || "Unknown");
 
-  // 3. Build manifest map (id → href) for XHTML items
+  // 3. Build manifest map: id → href (XHTML items only)
   const manifestItems: Record<string, string> = {};
-  const manifestRe =
-    /<item\s+([^>]*?)\/?\s*>/g;
+  const manifestRe = /<item\s+([^>]*?)\/?\s*>/g;
   let m: RegExpExecArray | null;
   while ((m = manifestRe.exec(opfXml))) {
     const attrs = m[1];
-    const idMatch = attrs.match(/id="([^"]+)"/);
-    const hrefMatch = attrs.match(/href="([^"]+)"/);
-    const typeMatch = attrs.match(/media-type="([^"]+)"/);
-    if (
-      idMatch &&
-      hrefMatch &&
-      typeMatch &&
-      typeMatch[1].includes("xhtml")
-    ) {
-      manifestItems[idMatch[1]] = hrefMatch[1];
+    const idM = attrs.match(/id="([^"]+)"/);
+    const hrefM = attrs.match(/href="([^"]+)"/);
+    const typeM = attrs.match(/media-type="([^"]+)"/);
+    if (idM && hrefM && typeM && typeM[1].includes("xhtml")) {
+      manifestItems[idM[1]] = hrefM[1];
     }
   }
 
@@ -82,8 +87,10 @@ export async function parseEpub(uri: string): Promise<ParsedEpub> {
   const spineIds: string[] = [];
   while ((m = spineRe.exec(opfXml))) spineIds.push(m[1]);
 
-  // 5. Read and extract text from each chapter in spine order
-  const chapters: string[] = [];
+  // 5. Read each spine item, extract title + text
+  const chapters: EpubChapter[] = [];
+  let chapterNumber = 0;
+
   for (const id of spineIds) {
     const href = manifestItems[id];
     if (!href) continue;
@@ -91,52 +98,62 @@ export async function parseEpub(uri: string): Promise<ParsedEpub> {
     const xhtml = await zip.file(fullPath)?.async("text");
     if (!xhtml) continue;
 
-    const text = stripHtml(xhtml);
-    if (text.length > 0) chapters.push(text);
+    const chapterTitle = extractHeading(xhtml) || `Chapter ${++chapterNumber}`;
+    const content = stripHtml(xhtml);
+    if (content.length > 0) {
+      chapters.push({ title: chapterTitle, content });
+    }
   }
 
   if (chapters.length === 0) {
     throw new Error("Could not extract any text from this EPUB");
   }
 
-  return { title, author, content: chapters.join("\n\n") };
+  return {
+    title,
+    author,
+    chapters,
+    content: chapters.map((c) => `${c.title}\n\n${c.content}`).join("\n\n"),
+  };
 }
 
-/** Strip HTML tags and decode common entities to get clean text. */
+/** Extract the first heading from an XHTML string. */
+function extractHeading(html: string): string | null {
+  const m = html.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i);
+  if (!m) return null;
+  const text = stripHtml(m[1]).trim();
+  return text.length > 0 ? text : null;
+}
+
+/** Strip HTML tags and decode common entities to get clean plain text. */
 function stripHtml(html: string): string {
   return html
-    // Remove style and script blocks entirely
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    // Convert block elements to line breaks
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n\n")
     .replace(/<\/div>/gi, "\n")
     .replace(/<\/h[1-6]>/gi, "\n\n")
     .replace(/<\/li>/gi, "\n")
-    // Strip remaining tags
     .replace(/<[^>]+>/g, "")
-    // Decode entities
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&rsquo;/g, "\u2019")
-    .replace(/&lsquo;/g, "\u2018")
-    .replace(/&rdquo;/g, "\u201D")
-    .replace(/&ldquo;/g, "\u201C")
-    .replace(/&mdash;/g, "\u2014")
-    .replace(/&ndash;/g, "\u2013")
-    .replace(/&hellip;/g, "\u2026")
+    .replace(/&rsquo;/g, "’")
+    .replace(/&lsquo;/g, "‘")
+    .replace(/&rdquo;/g, "”")
+    .replace(/&ldquo;/g, "“")
+    .replace(/&mdash;/g, "—")
+    .replace(/&ndash;/g, "–")
+    .replace(/&hellip;/g, "…")
     .replace(/&nbsp;/g, " ")
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
-    // Clean up whitespace
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-/** Decode XML/HTML entities in metadata strings. */
 function decodeEntities(s: string): string {
   return s
     .replace(/&amp;/g, "&")

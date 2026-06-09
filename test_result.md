@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Build a local-only eBook reader and editor app (Expo / React Native web) with AI writing assistance via a backend proxy. The app must support: a library of books stored in AsyncStorage, a rich-text editor with formatting toolbar, an AI drawer for continue/improve/shorten/expand suggestions, a reader with highlights and annotations, multi-format export (PDF, EPUB, DOCX, MD, TXT), and delete flows for both drafts and library books."
+user_problem_statement: "Build a production-grade eBook reader and editor for Android (Expo/React Native) with: real EPUB/DOCX/TXT import preserving chapter structure, long document support (400+ pages without freezing), AI writing assistance with memory/context for long docs, spell and grammar checking, and multi-format export verified on Android device."
 
 backend:
   - task: "AI Proxy API - health, suggest modes, session stickiness, input validation"
@@ -124,6 +124,21 @@ backend:
         comment: "Iteration 4: Backend 100% confirmed. All AI suggest modes and validation still passing."
 
 frontend:
+  - task: "EPUB parser - structured chapter extraction from real EPUB files"
+    implemented: true
+    working: true
+    file: "frontend/src/lib/epubParser.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "Previous implementation returned flat content string. No chapter titles extracted. No structured output. Not tested against any real file."
+      - working: true
+        agent: "main"
+        comment: "Rewrote to return EpubChapter[] with title+content per chapter. Extracts headings from XHTML h1/h2/h3. Falls back to Chapter N if no heading. Added parseEpubData() for testability without file I/O. 9/9 Jest tests pass: title/author extraction, 5+ chapters, non-empty content, heading extraction, no HTML tags in output, flat content backward compat, invalid EPUB error, fallback chapter names."
+
   - task: "Library tab - book listing, seed data, navigation"
     implemented: true
     working: true
@@ -255,9 +270,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Library import error alerts (Alert.alert no-op on web — 3 locations in index.tsx lines 119/140/162)"
-    - "Editor askAI() and Reader noNavigation flows still use Alert.alert (no-op on web)"
-    - "btnDanger / btnDangerText styles missing from editor/[id].tsx StyleSheet"
+    - "Task 2: Wire parseEpub into Library import button — save chapters to AsyncStorage, verify on Android emulator"
+    - "Task 3: Wire paginationEngine into reader for 400+ page books"
+    - "Task 4: AI context chunking for long documents"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -271,3 +286,5 @@ agent_communication:
     message: "Iteration 3 complete. Delete affordances added and statically verified. Alert.alert confirmed no-op on react-native-web 0.21 — functional delete must be tested on Android. Cosmetic: btnDanger styles undefined in editor StyleSheet."
   - agent: "testing"
     message: "Iteration 4 complete. ExportSheet modal replaces Alert.alert for export. window.confirm via dialogs.ts replaces Alert.alert for delete. All 6 export testIDs and both delete confirm dialogs verified on web preview. Remaining: 3 Alert.alert calls in library import flow (informational only, not blocking)."
+  - agent: "main"
+    message: "Task 1 complete. epubParser.ts rewritten to return EpubChapter[] with extracted titles and content. parseEpubData() added for unit testing. 9/9 Jest tests pass against synthetic 7-chapter EPUB. Next: Task 2 — wire into Library import UI."
