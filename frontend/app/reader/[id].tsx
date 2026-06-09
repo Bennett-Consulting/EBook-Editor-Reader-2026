@@ -39,7 +39,13 @@ import {
   saveBook,
   savePrefs,
 } from "../../src/lib/storage";
-import { paginate, clampPageIndex } from "../../src/lib/paginationEngine";
+import {
+  usePagination,
+  splitPageText,
+  computePageParaOffset,
+  PAGINATION_THRESHOLD,
+} from "../../src/hooks/usePagination";
+import PageNavBar from "../../src/components/PageNavBar";
 import ExportSheet from "../../src/components/ExportSheet";
 import TOCDrawer, {
   extractTOC,
@@ -86,15 +92,30 @@ export default function ReaderScreen() {
   // Current scroll position tracking
   const [currentParagraph, setCurrentParagraph] = useState(0);
 
-  const scrollRef = useRef<ScrollView>(null);
   const contentHeightRef = useRef(0);
   const layoutHeightRef = useRef(1);
   const scrollSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const paraOffsetsRef = useRef<number[]>([]);
 
-  // Pagination state — null means short book (scroll mode)
-  const [pages, setPages] = useState<string[] | null>(null);
-  const [currentPage, setCurrentPage] = useState(0);
+  // ── Pagination hook ───────────────────────────────────────────────────────
+
+  const { pages, currentPage, currentPageText, goToPage, scrollRef } = usePagination(
+    book?.content ?? "",
+    SCREEN_W,
+    SCREEN_H,
+    {
+      savedPageIndex: book?.scrollY ?? 0,
+      onPageWillChange: () => { paraOffsetsRef.current = []; },
+      onPageChange: (idx, progress) => {
+        setBook((prev) => {
+          if (!prev) return prev;
+          const updated = { ...prev, scrollY: idx, progress };
+          saveBook(updated);
+          return updated;
+        });
+      },
+    }
+  );
 
   // ── Load book & prefs ────────────────────────────────────────────────────
 
@@ -103,13 +124,9 @@ export default function ReaderScreen() {
       const [b, p] = await Promise.all([getBook(String(id)), getPrefs()]);
       setBook(b);
       setPrefs(p);
-      if (b && b.content.length > 50_000) {
-        // Long book — paginate and restore saved page index
-        const pg = paginate(b.content, SCREEN_W, SCREEN_H - 120);
-        setPages(pg);
-        setCurrentPage(clampPageIndex(b.scrollY ?? 0, pg.length));
-      } else {
-        // Short book — restore scroll position as before
+      // Short books only — restore pixel scroll position.
+      // Long books: the usePagination hook restores page index from book.scrollY.
+      if (b && b.content.length <= PAGINATION_THRESHOLD) {
         setTimeout(() => {
           if (b?.scrollY && scrollRef.current) {
             scrollRef.current.scrollTo({ y: b.scrollY, animated: false });
@@ -136,23 +153,17 @@ export default function ReaderScreen() {
     return book.content.split(/\s+/).filter(Boolean).length;
   }, [book]);
 
-  // Paragraphs visible on the current page (full list for short books)
-  const currentPageParagraphs = useMemo(() => {
-    if (!pages) return paragraphs;
-    const text = pages[currentPage] ?? "";
-    return text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-  }, [pages, currentPage, paragraphs]);
+  // Paragraphs visible on the current page (uses splitPageText from usePagination)
+  const currentPageParagraphs = useMemo(
+    () => splitPageText(currentPageText),
+    [currentPageText]
+  );
 
-  // Global paragraph index at the start of the current page — used so
-  // annotation/highlight lookups use the correct global index, not local page index.
-  const pageParaOffset = useMemo(() => {
-    if (!pages) return 0;
-    let count = 0;
-    for (let i = 0; i < currentPage; i++) {
-      count += pages[i].split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).length;
-    }
-    return count;
-  }, [pages, currentPage]);
+  // Global paragraph index at the start of the current page
+  const pageParaOffset = useMemo(
+    () => (pages ? computePageParaOffset(pages, currentPage) : 0),
+    [pages, currentPage]
+  );
 
   // ── Annotations hook (index-based, fixes duplicate bug) ───────────────
 
@@ -176,21 +187,6 @@ export default function ReaderScreen() {
       return next;
     });
   }, [resetChromeTimer]);
-
-  // Advance to a specific page, save index to Book.scrollY
-  const goToPage = useCallback(
-    (idx: number) => {
-      if (!pages || idx < 0 || idx >= pages.length || !book) return;
-      setCurrentPage(idx);
-      scrollRef.current?.scrollTo({ y: 0, animated: false });
-      paraOffsetsRef.current = [];
-      const progress = (idx + 1) / pages.length;
-      const updated = { ...book, scrollY: idx, progress };
-      saveBook(updated);
-      setBook(updated);
-    },
-    [pages, book]
-  );
 
   // Show chrome when any overlay opens
   useEffect(() => {
@@ -476,35 +472,16 @@ export default function ReaderScreen() {
 
       {/* ─── Page Navigation (long books only) ─── */}
       {pages && (
-        <View style={[styles.pageNav, { backgroundColor: bg, borderTopColor: paperMode ? "#0001" : theme.border }]}>
-          <TouchableOpacity
-            testID="page-prev"
-            onPress={() => goToPage(currentPage - 1)}
-            disabled={currentPage === 0}
-            style={styles.pageNavBtn}
-          >
-            <Ionicons
-              name="chevron-back"
-              size={24}
-              color={currentPage === 0 ? sub : (paperMode ? "#222" : theme.textPrimary)}
-            />
-          </TouchableOpacity>
-          <Text testID="page-indicator" style={[styles.pageIndicatorText, { color: sub }]}>
-            {`Page ${currentPage + 1} of ${pages.length}`}
-          </Text>
-          <TouchableOpacity
-            testID="page-next"
-            onPress={() => goToPage(currentPage + 1)}
-            disabled={currentPage === pages.length - 1}
-            style={styles.pageNavBtn}
-          >
-            <Ionicons
-              name="chevron-forward"
-              size={24}
-              color={currentPage === pages.length - 1 ? sub : (paperMode ? "#222" : theme.textPrimary)}
-            />
-          </TouchableOpacity>
-        </View>
+        <PageNavBar
+          currentPage={currentPage}
+          totalPages={pages.length}
+          onPrev={() => goToPage(currentPage - 1)}
+          onNext={() => goToPage(currentPage + 1)}
+          backgroundColor={bg}
+          textColor={sub}
+          activeColor={paperMode ? "#222" : theme.textPrimary}
+          borderColor={paperMode ? "#0001" : theme.border}
+        />
       )}
 
       {/* ─── Reading Progress Bar ─── */}
@@ -627,23 +604,4 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   noteText: { fontSize: 13, flex: 1, lineHeight: 18 },
-
-  pageNav: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-  },
-  pageNavBtn: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pageIndicatorText: {
-    fontSize: 13,
-    fontWeight: "500",
-  },
 });

@@ -139,6 +139,18 @@ frontend:
         agent: "main"
         comment: "Rewrote to return EpubChapter[] with title+content per chapter. Extracts headings from XHTML h1/h2/h3. Falls back to Chapter N if no heading. Added parseEpubData() for testability without file I/O. 9/9 Jest tests pass: title/author extraction, 5+ chapters, non-empty content, heading extraction, no HTML tags in output, flat content backward compat, invalid EPUB error, fallback chapter names."
 
+  - task: "Pagination portable module — usePagination hook + PageNavBar component"
+    implemented: true
+    working: true
+    file: "frontend/src/hooks/usePagination.ts, frontend/src/components/PageNavBar.tsx, frontend/app/reader/[id].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Extracted pagination integration into reusable usePagination hook and PageNavBar component. Pure helpers (splitPageText, computePageParaOffset, PAGINATION_THRESHOLD) exported for testing without a React renderer. reader/[id].tsx now calls usePagination() and <PageNavBar> — inline state/callbacks/styles removed. 144/144 Jest tests pass (paginationEngine + usePagination suites). To use in another app: import usePagination from src/hooks/usePagination and PageNavBar from src/components/PageNavBar — no other dependencies."
+
   - task: "Pagination — long books split into pages in reader"
     implemented: true
     working: true
@@ -320,5 +332,7 @@ agent_communication:
     message: "Task 1 complete. epubParser.ts rewritten to return EpubChapter[] with extracted titles and content. parseEpubData() added for unit testing. 9/9 Jest tests pass against synthetic 7-chapter EPUB. Next: Task 2 — wire into Library import UI."
   - agent: "main"
     message: "Task 2 complete. importEpubFromUri() extracted to storage.ts. index.tsx now shows import-loading spinner and import-error banner instead of Alert.alert. 13/13 Jest tests pass covering full import→save flow. Next: Task 3 — paginationEngine → reader."
+  - agent: "main"
+    message: "Task 3b complete. usePagination hook and PageNavBar component extracted. Pure helpers (splitPageText, computePageParaOffset, PAGINATION_THRESHOLD) exported and tested. reader/[id].tsx simplified to hook call + component. 144/144 Jest tests pass. Both files are portable — zero app-level dependencies. Next: Task 4 — AI sliding context window."
   - agent: "main"
     message: "Task 3 complete. paginate() wired into reader/[id].tsx. Books over 50,000 chars split into pages, one page in memory at a time. goToPage() saves page index to Book.scrollY. Page X of Y indicator (testID page-indicator) and prev/next arrow buttons added. clampPageIndex() added to paginationEngine.ts. 129/129 Jest tests pass (npx jest --testPathPattern=paginationEngine). Known limitation documented: annotation highlighting uses page-local para indices in paginated mode. Next: Task 4 — AI sliding context window."
