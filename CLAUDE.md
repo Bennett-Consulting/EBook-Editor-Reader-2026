@@ -106,8 +106,67 @@ All UI must follow `design_guidelines.json`:
 
 Be honest about this before starting any task:
 
-- **EPUB/DOCX import** — `epubParser.ts` exists but does not properly parse real EPUB files (chapters, TOC, images)
+- **EPUB import into Library UI** — parser works (`epubParser.ts` 9/9 tests pass) but not wired to the import button yet
+- **DOCX import** — not implemented at all
 - **Long document support** — 400+ page books will freeze; `paginationEngine.ts` exists but is not wired into the editor/reader
-- **AI memory for long docs** — no RAG/chunking; AI only sees the text passed directly, not the full book
+- **AI memory for long docs** — no sliding context window; AI only sees the text passed directly
 - **Spell/grammar checking** — no implementation; AI modes are prose continuation only
 - **Export on Android** — not verified on device; only web-tested (which is broken for print/sharing)
+
+---
+
+## Implementation Plan
+
+### Guardrails — append to EVERY task prompt
+
+> **Guardrails:**
+> - Do only what this task describes. Touch no files outside the listed scope.
+> - If you find a bug outside your task scope, document it in `test_result.md` but do not fix it.
+> - Do not create placeholder or stub implementations — if you cannot finish it fully, say so and stop.
+> - Run the actual test command and paste the output before marking `working: true` in `test_result.md`.
+> - The last line of your response must be exactly: `Verified working: YES/NO — [one sentence of evidence]`
+
+---
+
+### Task 2 — Wire EPUB import into Library UI
+
+**Scope:** `frontend/app/(tabs)/index.tsx`, `frontend/src/lib/storage.ts` only.
+
+**Prompt:**
+Wire `parseEpub()` from `src/lib/epubParser.ts` into the Library import button in `app/(tabs)/index.tsx`. When the user picks an `.epub` file via `expo-document-picker`: (1) show a loading indicator with testID `import-loading`, (2) call `parseEpub(uri)` to get structured chapters, (3) create a `Book` object where `content` is the flat joined text and store it via `storage.ts` `saveBook()`, (4) reload the library list, (5) on error show a user-visible message (not `Alert.alert` — use a state variable rendered as text with testID `import-error`). Do not change any other screen. Do not change `epubParser.ts`. Write a Jest test in `__tests__/lib/` that mocks `expo-document-picker` and `epubParser` and verifies the full import→save flow. Run `npx jest --testPathPattern=import` and paste output. Update `test_result.md`. **Guardrails apply.**
+
+---
+
+### Task 3 — Long Document Display (paginationEngine → reader)
+
+**Scope:** `frontend/app/reader/[id].tsx`, `frontend/src/lib/paginationEngine.ts` only.
+
+**Prompt:**
+Wire `paginationEngine.ts` into `app/reader/[id].tsx` so books over 50,000 characters are split into pages and only one page is held in memory at a time. Requirements: (1) on book open, run `paginate()` to get a `string[]` of pages, (2) render only the current page index, (3) swipe left/right or tap arrows to advance pages, (4) save current page index to the `Book.scrollY` field via `storage.ts` so progress is restored on re-open, (5) display `Page X of Y` with testID `page-indicator`. Do not touch the editor, AI, or any other screen. Write Jest tests verifying: paginate splits a 100,000-char string into multiple pages, page index is saved and restored. Run `npx jest --testPathPattern=pagination` and paste output. Update `test_result.md`. **Guardrails apply.**
+
+---
+
+### Task 4 — AI Sliding Context Window for Long Documents
+
+**Scope:** `frontend/src/lib/aiGateway.ts` only.
+
+**Prompt:**
+Implement a `buildContext()` function in `src/lib/aiGateway.ts` that assembles a sliding context window for AI calls on long documents. It must: (1) accept `{books: Book[], currentBookId: string, currentChapterIndex: number, selectedText: string, task: string}`, (2) load the current chapter's full text, (3) append the last 1,000 characters of the previous chapter (if exists) as "preceding context", (4) prepend the first 1,000 characters of the next chapter (if exists) as "following context", (5) generate and cache a book summary (max 500 tokens) stored in AsyncStorage key `@ebook/summary/{bookId}` — regenerate only if the book has been edited since last summary, (6) extract a style profile from chapters 1–3 (dominant tense, POV, average sentence length, any recurring proper nouns) stored as `@ebook/style/{bookId}`, (7) assemble the final prompt within a 4,000-token budget: `[style profile] + [book summary] + [prev tail] + [current chapter] + [next head] + [task instruction]`. Write Jest tests verifying: context includes prev/next chapter tails, respects token budget, summary is cached and not regenerated on second call, style profile is extracted correctly. Run `npx jest --testPathPattern=aiGateway` and paste output. Update `test_result.md`. **Guardrails apply.**
+
+---
+
+### Task 5 — Spell & Grammar Checking
+
+**Scope:** `frontend/src/lib/aiGateway.ts` (add grammar mode), `frontend/src/components/editor/AIEditingPanel.tsx` only.
+
+**Prompt:**
+Add a `grammar` mode to `aiGateway.ts` and wire it into `AIEditingPanel.tsx`. Requirements: (1) the grammar prompt instructs the AI to return a JSON array of corrections: `[{offset: number, length: number, original: string, suggestion: string, reason: string}]`, (2) corrections are displayed inline in the editor with the original text highlighted and the suggestion shown on tap, (3) each correction has Accept (testID `grammar-accept-{n}`) and Ignore (testID `grammar-ignore-{n}`) buttons, (4) accepting a correction applies it to the text and records it in `editHistory`, (5) the style profile from Task 4 is passed as context so the AI does not flag intentional stylistic choices. Write Jest tests verifying: grammar prompt returns valid JSON structure, accept applies the correction, ignore removes it from the list. Run `npx jest --testPathPattern=grammar` and paste output. Update `test_result.md`. **Guardrails apply.**
+
+---
+
+### Task 6 — Export Verified on Android
+
+**Scope:** `frontend/src/lib/exporter.ts` only.
+
+**Prompt:**
+Verify and fix all 5 export formats (PDF, EPUB, DOCX, MD, TXT) in `exporter.ts` to produce real files on a connected Android device or emulator running via `npx expo run:android`. For each format: (1) export the 7-chapter synthetic EPUB fixture from the epubParser tests, (2) verify the file exists at the returned URI using `expo-file-system`, (3) verify file size > 0. Fix any format that fails. Do not touch any UI components — only `exporter.ts`. Document each format pass/fail with file size evidence in `test_result.md`. **Guardrails apply.**
