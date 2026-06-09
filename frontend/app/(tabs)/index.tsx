@@ -22,7 +22,7 @@ import { File } from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { coverPalette, sampleBookContent, theme } from "../../src/lib/theme";
 import { Book } from "../../src/lib/types";
-import { getBooks, saveBook, deleteBook } from "../../src/lib/storage";
+import { getBooks, saveBook, deleteBook, importEpubFromUri } from "../../src/lib/storage";
 
 const DEMO_SEEDED_KEY = "@ebook/demo-seeded";
 import { confirmAction } from "../../src/lib/dialogs";
@@ -59,6 +59,8 @@ export default function LibraryScreen() {
   const [newTitle, setNewTitle] = useState("");
   const [newAuthor, setNewAuthor] = useState("");
   const [newColor, setNewColor] = useState(coverPalette[0]);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const list = await getBooks();
@@ -110,10 +112,9 @@ export default function LibraryScreen() {
   }, [load]);
 
   const importFile = async () => {
+    setImportError(null);
     try {
       const res = await DocumentPicker.getDocumentAsync({
-        // Restrict to text-based formats so Android Chrome's file input doesn't
-        // surface a "Camera / Take photo" option in the picker.
         type: [
           "text/plain",
           "text/markdown",
@@ -130,63 +131,46 @@ export default function LibraryScreen() {
       const asset = res.assets[0];
       const name = asset.name || "Untitled";
       const lower = name.toLowerCase();
-      let format: Book["format"] = "txt";
-      if (lower.endsWith(".md") || lower.endsWith(".markdown")) format = "md";
-      else if (lower.endsWith(".epub")) format = "epub";
 
-      let content = "";
-      let bookTitle = name.replace(/\.(txt|md|markdown|epub)$/i, "").slice(0, 80) || "Untitled";
-      let bookAuthor = "Imported";
+      setImporting(true);
 
-      if (format === "epub") {
-        try {
-          const { parseEpub } = await import("../../src/lib/epubParser");
-          const parsed = await parseEpub(asset.uri);
-          content = parsed.content;
-          bookTitle = parsed.title || bookTitle;
-          bookAuthor = parsed.author || bookAuthor;
-        } catch (e: any) {
-          Alert.alert(
-            "EPUB Import Error",
-            e?.message || "Could not parse this EPUB file. Try importing as .txt or .md.",
-          );
-          return;
-        }
+      if (lower.endsWith(".epub")) {
+        const coverColor = coverPalette[Math.floor(Math.random() * coverPalette.length)];
+        await importEpubFromUri(asset.uri, name, coverColor);
       } else {
+        let format: Book["format"] = lower.endsWith(".md") || lower.endsWith(".markdown") ? "md" : "txt";
+        let content = "";
         try {
           const file = new File(asset.uri);
           content = await file.text();
-        } catch (e) {
-          // Web: fetch it
+        } catch {
           const r = await fetch(asset.uri);
           content = await r.text();
         }
+        content = sanitize(content);
+        if (!content) throw new Error("This file appears to be empty.");
+        const book: Book = {
+          id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`,
+          title: name.replace(/\.(txt|md|markdown)$/i, "").slice(0, 80) || "Untitled",
+          author: "Imported",
+          content,
+          format,
+          coverColor: coverPalette[Math.floor(Math.random() * coverPalette.length)],
+          coverEmoji: format === "md" ? "📝" : "📄",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          progress: 0,
+          annotations: [],
+          isDraft: false,
+        };
+        await saveBook(book);
       }
 
-      content = sanitize(content);
-      if (!content) {
-        Alert.alert("Empty file", "This file appears to be empty.");
-        return;
-      }
-
-      const book: Book = {
-        id: makeId(),
-        title: bookTitle,
-        author: bookAuthor,
-        content,
-        format,
-        coverColor: coverPalette[Math.floor(Math.random() * coverPalette.length)],
-        coverEmoji: format === "md" ? "📝" : format === "epub" ? "📚" : "📄",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        progress: 0,
-        annotations: [],
-        isDraft: false,
-      };
-      await saveBook(book);
       await load();
     } catch (e: any) {
-      Alert.alert("Import failed", e?.message ?? "Unknown error");
+      setImportError(e?.message ?? "Import failed. Please try again.");
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -303,6 +287,24 @@ export default function LibraryScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {importing && (
+        <View testID="import-loading" style={styles.importBanner}>
+          <Ionicons name="cloud-upload-outline" size={16} color={theme.brand} />
+          <Text style={styles.importBannerText}>Importing…</Text>
+        </View>
+      )}
+      {importError && (
+        <View style={styles.importBanner}>
+          <Ionicons name="alert-circle-outline" size={16} color="#ff6b6b" />
+          <Text testID="import-error" style={[styles.importBannerText, { color: "#ff6b6b" }]}>
+            {importError}
+          </Text>
+          <TouchableOpacity onPress={() => setImportError(null)} hitSlop={10}>
+            <Ionicons name="close" size={16} color="#ff6b6b" />
+          </TouchableOpacity>
+        </View>
+      )}
 
       <FlatList
         testID="library-grid"
@@ -434,6 +436,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   iconBtnPrimary: { backgroundColor: theme.brand, borderColor: theme.brand },
+  importBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 20,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  importBannerText: { color: theme.brand, fontSize: 13, fontWeight: "600", flex: 1 },
 
   card: {},
   cover: {

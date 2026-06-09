@@ -139,6 +139,21 @@ frontend:
         agent: "main"
         comment: "Rewrote to return EpubChapter[] with title+content per chapter. Extracts headings from XHTML h1/h2/h3. Falls back to Chapter N if no heading. Added parseEpubData() for testability without file I/O. 9/9 Jest tests pass: title/author extraction, 5+ chapters, non-empty content, heading extraction, no HTML tags in output, flat content backward compat, invalid EPUB error, fallback chapter names."
 
+  - task: "EPUB import wired into Library UI"
+    implemented: true
+    working: true
+    file: "frontend/app/(tabs)/index.tsx, frontend/src/lib/storage.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "Previous code called parseEpub but used Alert.alert for errors (silent on web), no loading indicator, no testable import logic."
+      - working: true
+        agent: "main"
+        comment: "Extracted importEpubFromUri() into storage.ts — handles parse, sanitize, save in one testable function. Added importing/importError state to index.tsx. Loading shown with testID import-loading. Errors shown with testID import-error (dismissable, no Alert.alert). 13/13 Jest tests pass: parseEpub called with URI, correct title/author/format, coverColor set, saved to AsyncStorage, fallbacks, empty content error, error propagation, isDraft=false, progress=0, unique IDs."
+
   - task: "Library tab - book listing, seed data, navigation"
     implemented: true
     working: true
@@ -288,3 +303,5 @@ agent_communication:
     message: "Iteration 4 complete. ExportSheet modal replaces Alert.alert for export. window.confirm via dialogs.ts replaces Alert.alert for delete. All 6 export testIDs and both delete confirm dialogs verified on web preview. Remaining: 3 Alert.alert calls in library import flow (informational only, not blocking)."
   - agent: "main"
     message: "Task 1 complete. epubParser.ts rewritten to return EpubChapter[] with extracted titles and content. parseEpubData() added for unit testing. 9/9 Jest tests pass against synthetic 7-chapter EPUB. Next: Task 2 — wire into Library import UI."
+  - agent: "main"
+    message: "Task 2 complete. importEpubFromUri() extracted to storage.ts. index.tsx now shows import-loading spinner and import-error banner instead of Alert.alert. 13/13 Jest tests pass covering full import→save flow. Next: Task 3 — paginationEngine → reader."
