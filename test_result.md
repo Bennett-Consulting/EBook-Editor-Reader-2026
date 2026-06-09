@@ -139,6 +139,18 @@ frontend:
         agent: "main"
         comment: "Rewrote to return EpubChapter[] with title+content per chapter. Extracts headings from XHTML h1/h2/h3. Falls back to Chapter N if no heading. Added parseEpubData() for testability without file I/O. 9/9 Jest tests pass: title/author extraction, 5+ chapters, non-empty content, heading extraction, no HTML tags in output, flat content backward compat, invalid EPUB error, fallback chapter names."
 
+  - task: "AI streaming module — portable token-by-token streaming (Task 4b)"
+    implemented: true
+    working: true
+    file: "frontend/src/lib/ai/streaming/"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Built src/lib/ai/streaming/ with streamRequest() routing to four provider implementations: OpenAI/Groq/custom (SSE), Anthropic (SSE with content_block_delta), Ollama/BitNet (NDJSON), Gemini (SSE with key-in-URL). Shared readLines() utility in streamUtils.ts reads ReadableStream<Uint8Array> line-by-line. Throws on fatal errors (non-200). Calls onError on malformed chunks. Zero app deps — only fetch (RN 0.71+ / Node 18+). 23/23 Jest tests pass (npx jest --testPathPattern=ai/streaming)."
+
   - task: "AI context module — portable sliding context window (Task 4)"
     implemented: true
     working: true
