@@ -139,6 +139,18 @@ frontend:
         agent: "main"
         comment: "Rewrote to return EpubChapter[] with title+content per chapter. Extracts headings from XHTML h1/h2/h3. Falls back to Chapter N if no heading. Added parseEpubData() for testability without file I/O. 9/9 Jest tests pass: title/author extraction, 5+ chapters, non-empty content, heading extraction, no HTML tags in output, flat content backward compat, invalid EPUB error, fallback chapter names."
 
+  - task: "AI server discovery — mDNS + .well-known + subdomain probing (Task 4e)"
+    implemented: true
+    working: true
+    file: "frontend/src/lib/ai/discovery/"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Built src/lib/ai/discovery/ — portable, zero app deps, uses only fetch+AbortController. Three discovery strategies: (1) .well-known/ai-server JSON at org domain (enterprise/govt/edu); (2) subdomain heuristics (ai.*, llm.*, openai.*, ollama.*, gpt.*, ml.*) with both https:// and http://; (3) mDNS hosts passed by caller (native dep injected) probed on ports 80, 11434, 8080, 8000, 3000. probeServer() tries /v1/models (OpenAI-compat) then /api/tags (Ollama); classifies provider from response shape. All probes run concurrently via Promise.allSettled. Results deduplicated by canonical URL, sorted fastest-first. 36/36 Jest tests pass. 351/351 total (no regressions)."
+
   - task: "AI wire-up — streamAIResponse + runBookAnalysis + streaming editor mode (Task 4d)"
     implemented: true
     working: true

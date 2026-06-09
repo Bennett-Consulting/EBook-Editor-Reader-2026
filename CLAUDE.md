@@ -110,8 +110,10 @@ Be honest about this before starting any task:
 - **Long document pagination** — ✓ done (Tasks 3 + 3b): `usePagination` hook + `PageNavBar` component, portable
 - **DOCX import** — not implemented at all
 - **AI context module** — not built yet (Task 4): `src/lib/ai/context/` with `buildContext()` pure function
-- **AI streaming** — not built yet (Task 4b): `src/lib/ai/streaming/` with per-provider streaming
-- **Whole-book analysis** — not built yet (Task 4c): `src/lib/ai/analysis/` with map-reduce orchestration
+- **AI streaming** — ✓ done (Task 4b): `src/lib/ai/streaming/`
+- **Whole-book analysis** — ✓ done (Task 4c): `src/lib/ai/analysis/`
+- **AI context + wire-up** — ✓ done (Tasks 4 + 4d): `src/lib/ai/context/`, `aiGateway.ts`
+- **AI server discovery** — not built yet (Task 4e): `src/lib/ai/discovery/` — mDNS + .well-known + subdomain
 - **AI suggestion engine** — not built yet (Task 5): `src/lib/suggestions/` standalone module
 - **Spell/grammar checking** — will be handled as a suggestion mode in Task 5
 - **Export on Android** — not verified on device (Task 6); only web-tested (broken for print/sharing)
@@ -360,6 +362,75 @@ interface AnalysisResult {
 
 **Prompt:**
 Wire the portable AI modules into the app. In `aiGateway.ts`: (1) replace the existing inline context assembly with a call to `buildContext()` from `src/lib/ai/context/`, reading preceding/following text and cached summaries from AsyncStorage keys `@ebook/summary/{bookId}` and `@ebook/style/{bookId}` before passing them in, (2) add a `streamAIResponse(bookId, prompt, callbacks)` function that reads the active AI key from AsyncStorage, builds a `StreamConfig`, and delegates to `streamRequest()` from `src/lib/ai/streaming/`, (3) add a `runBookAnalysis(bookId, onProgress)` function that loads the book content, calls `analyzeBook()` from `src/lib/ai/analysis/`, and writes the resulting summary and style profile back to AsyncStorage. In `AIEditingPanel.tsx`: replace any direct `fetch` calls with `streamAIResponse()` so responses stream token-by-token into the UI (append to a `useState` string). Do not touch any portable module files. Write Jest tests mocking AsyncStorage: `streamAIResponse` reads active key and calls `streamRequest`, `runBookAnalysis` writes summary to correct AsyncStorage key. Run `npx jest --testPathPattern=aiGateway` and paste output. Update `test_result.md`. **Guardrails apply.**
+
+---
+
+### Task 4e — AI Server Discovery (mDNS + .well-known + subdomain probing)
+
+**Scope:** New folder `frontend/src/lib/ai/discovery/` only. No changes to existing files. Task 4d must be complete first.
+
+**Why this exists:** Organizations running internal AI servers (government, enterprise, education) should not need to manually type a base URL. This module discovers candidate URLs automatically via two complementary strategies: (1) `.well-known/ai-server` DNS lookup at the org domain, and (2) mDNS/Zeroconf for local-network servers. Both feed the same `customBaseUrl` field in `StreamConfig`.
+
+**Architecture:**
+```
+frontend/src/lib/ai/discovery/
+  index.ts        — public API (discoverAIServers, probeServer)
+  types.ts        — DiscoveryOptions, DiscoveredServer, DiscoveryResult
+  probe.ts        — probeServer(): hit /v1/models or /api/tags, classify provider
+  candidates.ts   — buildCandidateURLs(): .well-known + subdomain heuristics + mDNS hosts
+```
+
+**Public API (`index.ts`) must export:**
+```typescript
+// Probe a single URL — returns server info or null if unreachable/unrecognised
+probeServer(url: string, timeoutMs?: number): Promise<DiscoveredServer | null>
+
+// Discover AI servers from all available sources.
+// mDNS scanning requires a native module (react-native-zeroconf) — the caller
+// passes already-resolved hostnames so the module itself stays dep-free.
+discoverAIServers(options: DiscoveryOptions): Promise<DiscoveryResult>
+```
+
+**Types (`types.ts`):**
+```typescript
+interface DiscoveryOptions {
+  orgDomain?: string      // 'company.com' — enables .well-known + subdomain probing
+  mdnsHosts?: string[]    // mDNS-discovered hostnames passed in by caller
+  timeoutMs?: number      // per-probe timeout ms (default 3000)
+}
+
+interface DiscoveredServer {
+  url: string             // canonical base URL, e.g. 'https://ai.company.com'
+  provider: 'openai' | 'anthropic' | 'ollama' | 'custom'
+  name?: string           // from .well-known response or /v1/models metadata
+  models: string[]        // model IDs returned by the probe (may be empty)
+  source: 'well-known' | 'subdomain' | 'mdns' | 'manual'
+  latencyMs: number       // round-trip time of the successful probe
+}
+
+interface DiscoveryResult {
+  servers: DiscoveredServer[]
+  probed: number          // total candidate URLs attempted
+  errors: string[]        // non-fatal probe errors for diagnostics
+}
+```
+
+**Behaviour rules:**
+- Probing uses `AbortController` + `timeoutMs` (portable: Node 18+, React Native 0.71+)
+- `probeServer` tries `/v1/models` first (OpenAI-compat); on 404/error tries `/api/tags` (Ollama)
+- Provider classification: `{ data: [...] }` shape → `'openai'`; `{ models: [...] }` shape → `'ollama'`; others → `'custom'`
+- `.well-known/ai-server` response shape: `{ url, name?, provider?, description? }` — if present, the `url` field is probed directly
+- Subdomain candidates (tried for `orgDomain`): `ai.`, `llm.`, `openai.`, `ollama.`, `gpt.`, `ml.` — both `https://` and `http://`
+- mDNS hosts probed as `http://{host}`, `http://{host}:11434` (Ollama default), `http://{host}:8080` (common alt)
+- All probes run concurrently via `Promise.allSettled` — no serial waiting
+- Results deduplicated by canonical URL (trailing slash stripped)
+- Zero imports from app code, AsyncStorage, or React Native
+
+**Requirements:**
+- Write Jest tests mocking `fetch`: probeServer returns null for unreachable URLs, correctly classifies OpenAI-compat vs Ollama responses, discoverAIServers probes .well-known URL when orgDomain set, probes all subdomain candidates, probes mDNS hosts on correct ports, deduplicates results
+- Run `npx jest --testPathPattern=ai/discovery` and paste output
+- Update `test_result.md`
+- **Guardrails apply.**
 
 ---
 
