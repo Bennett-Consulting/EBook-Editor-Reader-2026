@@ -8,6 +8,7 @@
  * This file is the router: detection, config, routing, fallback models.
  */
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AIProvider, AIProviderConfig, AIModel } from "./types";
 import {
   chatOpenAICompat,
@@ -21,6 +22,13 @@ import {
   discoverOllamaModels,
   discoverBitnetModels,
 } from "./providers";
+import { getActiveAIKey, getBook } from "./storage";
+import { buildContext } from "./ai/context";
+import type { StyleProfile } from "./ai/context";
+import { streamRequest } from "./ai/streaming";
+import type { StreamCallbacks, StreamConfig } from "./ai/streaming";
+import { analyzeBook } from "./ai/analysis";
+import type { AnalysisProgress, AnalysisResult } from "./ai/analysis";
 
 // ─── Provider Detection ─────────────────────────────────────────────────────
 
@@ -281,10 +289,26 @@ export async function validateKey(
   }
 }
 
-// ─── Fallback Models ────────────────────────────────────────────────────────
+// ─── Fallback Models (LAST RESORT ONLY) ─────────────────────────────────────
+//
+// These are used ONLY when live model discovery fails (network down, rate-limited
+// during discovery, etc.). They are a snapshot of well-known public model IDs and
+// WILL become stale over time.
+//
+// For ALL real usage the model list comes from discoverModels() — which queries
+// the provider's own /models endpoint at runtime. This supports:
+//   - Any current or future OpenAI-compatible service
+//   - Org-internal / government / educational AI servers (pass baseUrl)
+//   - Ollama, vLLM, LM Studio, LocalAI, and any OpenAI-compat fork
+//   - Custom providers with unknown key formats (provider = 'custom')
+//
+// custom, ollama, bitnet return [] here intentionally — we never guess model IDs
+// for services whose model list is unknown. If discovery fails for these, the
+// caller receives a clear error rather than a silently wrong model ID.
 
 function _getFallbackModels(provider: AIProvider): AIModel[] {
   const fallbacks: Record<string, AIModel[]> = {
+    // Known public cloud providers — stale snapshot, discovery is always preferred
     openai: [
       { id: "gpt-4o", name: "GPT-4o", provider: "openai", tier: "pro" },
       { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "openai", tier: "flash" },
@@ -301,9 +325,188 @@ function _getFallbackModels(provider: AIProvider): AIModel[] {
       { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B", provider: "groq", tier: "pro" },
       { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B", provider: "groq", tier: "flash" },
     ],
+    // Intentionally empty — model IDs for local/custom services cannot be guessed.
     ollama: [],
     bitnet: [],
     custom: [],
   };
-  return fallbacks[provider] || [];
+  return fallbacks[provider] ?? [];
+}
+
+// ─── AsyncStorage keys for AI analysis cache ─────────────────────────────────
+
+const summaryKey = (id: string) => `@ebook/summary/${id}`;
+const styleKey = (id: string) => `@ebook/style/${id}`;
+
+// ─── Stream AI Response ───────────────────────────────────────────────────────
+
+/**
+ * Stream an AI writing-assistance response for a specific book.
+ *
+ * Reads the active AI key from AsyncStorage. Reads cached book summary and
+ * style profile (if available) and uses `buildContext()` to assemble the
+ * prompt within the default token budget. Delegates to `streamRequest()`.
+ *
+ * Throws if no AI key is configured.
+ */
+export async function streamAIResponse(
+  bookId: string,
+  currentText: string,
+  taskInstruction: string,
+  callbacks: StreamCallbacks,
+  opts?: {
+    precedingText?: string;
+    followingText?: string;
+    tokenBudget?: number;
+    model?: string;
+  },
+): Promise<void> {
+  const activeKey = await getActiveAIKey();
+  if (!activeKey) {
+    throw new Error(
+      "No AI provider configured. Go to Settings → AI Providers to add your API key.",
+    );
+  }
+
+  // Read cached summary and style profile for this book
+  const [summaryRaw, styleRaw] = await Promise.all([
+    AsyncStorage.getItem(summaryKey(bookId)),
+    AsyncStorage.getItem(styleKey(bookId)),
+  ]);
+  const bookSummary = summaryRaw ?? undefined;
+  const styleProfile: StyleProfile | undefined = styleRaw
+    ? (JSON.parse(styleRaw) as StyleProfile)
+    : undefined;
+
+  // Assemble context-budgeted prompt
+  const { prompt } = buildContext({
+    currentText,
+    precedingText: opts?.precedingText,
+    followingText: opts?.followingText,
+    bookSummary,
+    styleProfile,
+    taskInstruction,
+    tokenBudget: opts?.tokenBudget,
+  });
+
+  // Select model:
+  //   1. Caller-supplied model override (highest priority)
+  //   2. Live discovery from the provider's /models endpoint (covers any
+  //      current, future, or org-internal AI engine — no hardcoded IDs)
+  //   3. Snapshot fallback only if live discovery fails (network down, etc.)
+  let model = opts?.model ?? "";
+  if (!model) {
+    let discovered: AIModel[] = [];
+    try {
+      discovered = await discoverModels(
+        activeKey.provider,
+        activeKey.apiKey,
+        activeKey.customBaseUrl,
+      );
+    } catch {
+      // Discovery failed — fall through to snapshot fallback below
+    }
+    if (discovered.length === 0) {
+      discovered = _getFallbackModels(activeKey.provider);
+    }
+    model = pickBestModel(discovered, "continue")?.id ?? "";
+  }
+
+  if (!model) {
+    throw new Error(
+      `No models available for provider "${activeKey.provider}". ` +
+      "Ensure the provider is reachable and your key has permission to list models.",
+    );
+  }
+
+  const config: StreamConfig = {
+    provider: activeKey.provider as StreamConfig["provider"],
+    apiKey: activeKey.apiKey,
+    model,
+    baseUrl: activeKey.customBaseUrl,
+    prompt,
+  };
+
+  return streamRequest(config, callbacks);
+}
+
+// ─── Run Book Analysis ────────────────────────────────────────────────────────
+
+/**
+ * Run a full map-reduce analysis of a book and cache the result.
+ *
+ * Loads the book content from storage, runs `analyzeBook()` from the analysis
+ * module, and writes the resulting summary and style profile to AsyncStorage:
+ *   `@ebook/summary/{bookId}` — plain text summary
+ *   `@ebook/style/{bookId}`   — JSON-encoded StyleProfile
+ *
+ * Yields progress events to `onProgress` if provided.
+ * Returns the final `AnalysisResult`.
+ */
+export async function runBookAnalysis(
+  bookId: string,
+  onProgress?: (p: AnalysisProgress) => void,
+): Promise<AnalysisResult> {
+  const book = await getBook(bookId);
+  if (!book) throw new Error(`Book not found: ${bookId}`);
+
+  const activeKey = await getActiveAIKey();
+  if (!activeKey) {
+    throw new Error(
+      "No AI provider configured. Go to Settings → AI Providers to add your API key.",
+    );
+  }
+
+  // Live model discovery — same pattern as streamAIResponse.
+  // Supports any provider, including org-internal engines at a custom baseUrl.
+  let discovered: AIModel[] = [];
+  try {
+    discovered = await discoverModels(
+      activeKey.provider,
+      activeKey.apiKey,
+      activeKey.customBaseUrl,
+    );
+  } catch {
+    // Ignore — fall through to snapshot fallback
+  }
+  if (discovered.length === 0) {
+    discovered = _getFallbackModels(activeKey.provider);
+  }
+  const model = pickBestModel(discovered, "improve")?.id ?? "";
+
+  if (!model) {
+    throw new Error(
+      `No models available for provider "${activeKey.provider}". ` +
+      "Ensure the provider is reachable and your key has permission to list models.",
+    );
+  }
+
+  const providerConfig: StreamConfig = {
+    provider: activeKey.provider as StreamConfig["provider"],
+    apiKey: activeKey.apiKey,
+    model,
+    baseUrl: activeKey.customBaseUrl,
+    prompt: "", // overridden per chunk by analyzeBook
+  };
+
+  const gen = analyzeBook({ fullText: book.content, providerConfig });
+
+  let result: AnalysisResult | undefined;
+  let iteration = await gen.next();
+
+  while (!iteration.done) {
+    const progress = iteration.value as AnalysisProgress;
+    onProgress?.(progress);
+    iteration = await gen.next();
+  }
+
+  result = iteration.value as AnalysisResult;
+
+  // Cache summary and style profile for future prompts
+  await Promise.all([
+    AsyncStorage.setItem(summaryKey(bookId), result.summary),
+    AsyncStorage.setItem(styleKey(bookId), JSON.stringify(result.styleProfile)),
+  ]);
+
+  return result;
 }

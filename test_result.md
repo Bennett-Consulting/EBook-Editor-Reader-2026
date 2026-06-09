@@ -139,6 +139,18 @@ frontend:
         agent: "main"
         comment: "Rewrote to return EpubChapter[] with title+content per chapter. Extracts headings from XHTML h1/h2/h3. Falls back to Chapter N if no heading. Added parseEpubData() for testability without file I/O. 9/9 Jest tests pass: title/author extraction, 5+ chapters, non-empty content, heading extraction, no HTML tags in output, flat content backward compat, invalid EPUB error, fallback chapter names."
 
+  - task: "AI wire-up — streamAIResponse + runBookAnalysis + streaming editor mode (Task 4d)"
+    implemented: true
+    working: true
+    file: "frontend/src/lib/aiGateway.ts, frontend/src/components/editor/AIEditingPanel.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added streamAIResponse() and runBookAnalysis() to aiGateway.ts. Both use live discoverModels() as primary model selection — no hardcoded IDs. Snapshot fallback (_getFallbackModels) used ONLY when discovery fails (network down). Custom/org-internal providers (provider='custom', baseUrl='https://...') use discoverOpenAIModels at that URL — works for any OpenAI-compatible server (vLLM, Ollama, LM Studio, internal AI). Model IDs never guessed for custom/ollama/bitnet providers. Added streaming 'Continue' mode to AIEditingPanel.tsx with live token-by-token append via useState. bookId prop added to pass cached context to streamAIResponse. 43/43 aiGateway tests pass. 315/315 total tests pass (no regressions)."
+
   - task: "AI analysis module — portable map-reduce whole-book analysis (Task 4c)"
     implemented: true
     working: true

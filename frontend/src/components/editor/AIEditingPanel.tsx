@@ -6,7 +6,7 @@
  * and action buttons (apply fix, apply all, replace, etc.)
  */
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -29,15 +29,24 @@ import {
   ToneAnalysis,
   runEditingMode,
 } from "../../lib/aiEditing";
+import { streamAIResponse } from "../../lib/aiGateway";
 
 // ─── Mode config ────────────────────────────────────────────────────────────
 
+type PanelMode = EditingMode | "stream-continue";
+
 const MODES: {
-  key: EditingMode;
+  key: PanelMode;
   label: string;
   icon: string;
   desc: string;
 }[] = [
+  {
+    key: "stream-continue",
+    label: "Continue",
+    icon: "✍️",
+    desc: "AI continues writing, streamed live",
+  },
   {
     key: "spellcheck",
     label: "Spelling",
@@ -69,6 +78,8 @@ const MODES: {
 interface Props {
   visible: boolean;
   content: string;
+  /** Book ID used to look up cached summary and style profile for AI context. */
+  bookId?: string;
   onApplyFix: (original: string, replacement: string) => void;
   onReplaceAll: (newContent: string) => void;
   onAppendBelow: (text: string) => void;
@@ -80,18 +91,22 @@ interface Props {
 export default function AIEditingPanel({
   visible,
   content,
+  bookId = "",
   onApplyFix,
   onReplaceAll,
   onAppendBelow,
   onClose,
 }: Props) {
-  const [activeMode, setActiveMode] = useState<EditingMode>("spellcheck");
+  const [activeMode, setActiveMode] = useState<PanelMode>("stream-continue");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<EditingResult | null>(null);
   const [appliedFixes, setAppliedFixes] = useState<Set<number>>(new Set());
+  // Streaming "Continue" mode state — tokens appended as they arrive
+  const [streamText, setStreamText] = useState("");
+  const streamDoneRef = useRef(false);
 
   const runMode = useCallback(
-    async (mode: EditingMode) => {
+    async (mode: PanelMode) => {
       if (!content.trim()) {
         Alert.alert("Nothing to check", "Write some text first.");
         return;
@@ -100,8 +115,40 @@ export default function AIEditingPanel({
       setLoading(true);
       setResult(null);
       setAppliedFixes(new Set());
+
+      // ── Streaming "Continue" mode ──────────────────────────────────────────
+      if (mode === "stream-continue") {
+        setStreamText("");
+        streamDoneRef.current = false;
+        try {
+          await streamAIResponse(
+            bookId,
+            content,
+            "Continue this passage in the same style, tone, and tense. Write 2-4 sentences that flow naturally from where the text ends. Return only the continuation, no preamble.",
+            {
+              onChunk: (chunk) => {
+                setStreamText((prev) => prev + chunk);
+              },
+              onDone: (full) => {
+                setStreamText(full);
+                streamDoneRef.current = true;
+                setLoading(false);
+              },
+              onError: (err) => {
+                Alert.alert("Stream error", err.message);
+              },
+            },
+          );
+        } catch (e: any) {
+          Alert.alert("Error", e?.message || "AI streaming failed");
+          setLoading(false);
+        }
+        return;
+      }
+
+      // ── Existing editing modes ─────────────────────────────────────────────
       try {
-        const res = await runEditingMode(mode, content);
+        const res = await runEditingMode(mode as EditingMode, content);
         setResult(res);
       } catch (e: any) {
         Alert.alert("Error", e?.message || "AI editing failed");
@@ -109,7 +156,7 @@ export default function AIEditingPanel({
         setLoading(false);
       }
     },
-    [content]
+    [content, bookId]
   );
 
   const handleApplySpellFix = (index: number, issue: SpellIssue) => {
@@ -209,7 +256,25 @@ export default function AIEditingPanel({
 
           {/* Results Area */}
           <ScrollView style={styles.resultsBox}>
-            {loading ? (
+            {loading && activeMode === "stream-continue" ? (
+              // Streaming mode: show tokens as they arrive while loading
+              <View style={styles.streamWrap}>
+                <View style={styles.streamHeader}>
+                  <ActivityIndicator color={theme.brand} size="small" />
+                  <Text style={styles.streamLabel}>Writing…</Text>
+                </View>
+                <Text testID="stream-output" style={styles.streamText}>
+                  {streamText}
+                </Text>
+              </View>
+            ) : !loading && activeMode === "stream-continue" && streamText ? (
+              // Streaming complete — show result with append/replace actions
+              <View style={styles.streamWrap}>
+                <Text testID="stream-output" style={styles.streamText}>
+                  {streamText}
+                </Text>
+              </View>
+            ) : loading ? (
               <View style={styles.loadingWrap}>
                 <ActivityIndicator color={theme.brand} size="large" />
                 <Text style={styles.loadingText}>
@@ -250,6 +315,24 @@ export default function AIEditingPanel({
 
           {/* Actions */}
           <View style={styles.actions}>
+            {activeMode === "stream-continue" && streamText && !loading && (
+              <>
+                <TouchableOpacity
+                  testID="stream-append"
+                  onPress={() => { onAppendBelow(streamText); handleClose(); }}
+                  style={[styles.btn, styles.btnPrimary, { flex: 1 }]}
+                >
+                  <Text style={styles.btnPrimaryText}>Append below</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID="stream-replace"
+                  onPress={() => { onReplaceAll(streamText); handleClose(); }}
+                  style={[styles.btn, styles.btnGhost, { flex: 1 }]}
+                >
+                  <Text style={styles.btnGhostText}>Replace</Text>
+                </TouchableOpacity>
+              </>
+            )}
             {result?.mode === "spellcheck" &&
               (result.spellIssues?.length ?? 0) > 0 && (
                 <TouchableOpacity
@@ -871,6 +954,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     fontFamily: Platform.select({ ios: "Courier New", default: "monospace" }),
+  },
+
+  // Streaming
+  streamWrap: {
+    padding: 12,
+    backgroundColor: theme.surfaceHi,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  streamHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
+  streamLabel: {
+    color: theme.textSecondary,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  streamText: {
+    color: theme.textPrimary,
+    fontSize: 15,
+    lineHeight: 24,
+    fontFamily: Platform.select({ ios: "Georgia", default: "serif" }),
   },
 
   // Actions
