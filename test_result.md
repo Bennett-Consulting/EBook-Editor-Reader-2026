@@ -139,6 +139,18 @@ frontend:
         agent: "main"
         comment: "Rewrote to return EpubChapter[] with title+content per chapter. Extracts headings from XHTML h1/h2/h3. Falls back to Chapter N if no heading. Added parseEpubData() for testability without file I/O. 9/9 Jest tests pass: title/author extraction, 5+ chapters, non-empty content, heading extraction, no HTML tags in output, flat content backward compat, invalid EPUB error, fallback chapter names."
 
+  - task: "AI context module — portable sliding context window (Task 4)"
+    implemented: true
+    working: true
+    file: "frontend/src/lib/ai/context/index.ts, frontend/src/lib/ai/context/types.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Built src/lib/ai/context/ with buildContext(), extractStyleProfile(), estimateTokens(). Zero app-level dependencies. buildContext() assembles prompt within token budget, drops optional sections in priority order (followingHead → precedingTail → bookSummary → styleProfile). extractStyleProfile() detects tense, POV, avg sentence length, recurring proper nouns. 24/24 Jest tests pass (npx jest --testPathPattern=ai/context). One fix during development: proper noun regex was too restrictive (lookbehind blocked newline-preceded names); replaced with simple capitalized-word match gated by count>=2 and COMMON_CAPS blocklist."
+
   - task: "Pagination portable module — usePagination hook + PageNavBar component"
     implemented: true
     working: true

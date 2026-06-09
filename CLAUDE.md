@@ -106,12 +106,15 @@ All UI must follow `design_guidelines.json`:
 
 Be honest about this before starting any task:
 
-- **EPUB import into Library UI** — parser works (`epubParser.ts` 9/9 tests pass) but not wired to the import button yet
+- **EPUB import** — ✓ done (Tasks 1 + 2)
+- **Long document pagination** — ✓ done (Tasks 3 + 3b): `usePagination` hook + `PageNavBar` component, portable
 - **DOCX import** — not implemented at all
-- **Long document support** — 400+ page books will freeze; `paginationEngine.ts` exists but is not wired into the editor/reader
-- **AI memory for long docs** — no sliding context window; AI only sees the text passed directly
-- **Spell/grammar checking** — no implementation; AI modes are prose continuation only
-- **Export on Android** — not verified on device; only web-tested (which is broken for print/sharing)
+- **AI context module** — not built yet (Task 4): `src/lib/ai/context/` with `buildContext()` pure function
+- **AI streaming** — not built yet (Task 4b): `src/lib/ai/streaming/` with per-provider streaming
+- **Whole-book analysis** — not built yet (Task 4c): `src/lib/ai/analysis/` with map-reduce orchestration
+- **AI suggestion engine** — not built yet (Task 5): `src/lib/suggestions/` standalone module
+- **Spell/grammar checking** — will be handled as a suggestion mode in Task 5
+- **Export on Android** — not verified on device (Task 6); only web-tested (broken for print/sharing)
 
 ---
 
@@ -146,28 +149,232 @@ Wire `paginationEngine.ts` into `app/reader/[id].tsx` so books over 50,000 chara
 
 ---
 
-### Task 4 — AI Sliding Context Window for Long Documents
+### Portable AI Module Architecture
 
-**Scope:** `frontend/src/lib/aiGateway.ts` only.
+All AI modules live under `frontend/src/lib/ai/` and follow the same portability contract as `paginationEngine.ts` and `suggestions/`:
+- **Zero app-level imports** — no `storage.ts`, no AsyncStorage, no React Native, no Expo
+- **Caller provides everything** — text, providerConfig, cached summaries; the module never reaches out
+- **App-specific wiring is thin** — `aiGateway.ts` reads from AsyncStorage and hands data into the portable modules; it is the only file that knows about the app
+
+```
+frontend/src/lib/ai/
+  context/           — Task 4:  buildContext() — sliding window assembly
+  streaming/         — Task 4b: streamRequest() — token-by-token AI responses
+  analysis/          — Task 4c: analyzeBook()  — map-reduce whole-book analysis
+```
+
+---
+
+### Task 4 — AI Context Module (portable sliding context window)
+
+**Scope:** New folder `frontend/src/lib/ai/context/` only. No changes to existing files.
+
+**Architecture:**
+```
+frontend/src/lib/ai/context/
+  index.ts     — public API (buildContext, extractStyleProfile, estimateTokens)
+  types.ts     — ContextRequest, ContextResult, StyleProfile (no app imports)
+```
+
+**Public API (`index.ts`) must export:**
+```typescript
+// Assemble a prompt context window within a token budget
+buildContext(request: ContextRequest): ContextResult
+
+// Extract author style profile from sample text (chapters 1–3 or equivalent)
+extractStyleProfile(sampleText: string): StyleProfile
+
+// Rough token estimator (4 chars ≈ 1 token) — used for budget enforcement
+estimateTokens(text: string): number
+```
+
+**Types (`types.ts`):**
+```typescript
+interface ContextRequest {
+  currentText: string          // the chapter or selection being worked on
+  precedingText?: string       // text before currentText (tail used, not full)
+  followingText?: string       // text after currentText (head used, not full)
+  bookSummary?: string         // pre-computed whole-book summary (from Task 4c)
+  styleProfile?: StyleProfile  // pre-computed style profile
+  taskInstruction: string      // what the AI should do ("continue", "improve", etc.)
+  tailLength?: number          // chars to take from preceding/following (default 1000)
+  tokenBudget?: number         // max tokens for assembled prompt (default 4000)
+}
+
+interface ContextResult {
+  prompt: string               // assembled prompt ready to send to any AI provider
+  tokenEstimate: number        // estimated token count of assembled prompt
+  sections: {                  // what made it in and what was trimmed
+    styleProfile: boolean
+    bookSummary: boolean
+    precedingTail: boolean
+    currentText: boolean       // always true
+    followingHead: boolean
+    taskInstruction: boolean   // always true
+  }
+}
+
+interface StyleProfile {
+  dominantTense: 'past' | 'present' | 'unknown'
+  pointOfView: 'first' | 'second' | 'third' | 'unknown'
+  avgSentenceLength: number    // words
+  recurringNouns: string[]     // top 10 proper nouns
+  rawSample: string            // first 500 chars used for extraction
+}
+```
+
+**Requirements:**
+- Zero imports from outside `src/lib/ai/context/` — no app types, no storage, no React
+- `buildContext()` must trim preceding/following to `tailLength` chars before assembling
+- Token budget enforcement: fit as many sections as possible within `tokenBudget`, drop in priority order: followingHead → precedingTail → bookSummary → styleProfile
+- Write Jest tests: context includes prev tail (1000 chars), token budget enforced (prompt ≤ budget), sections flags reflect what was included, style profile extracts tense/POV correctly from sample text, estimateTokens returns sensible values
+- Run `npx jest --testPathPattern=ai/context` and paste output
+- Update `test_result.md`
+- **Guardrails apply.**
+
+---
+
+### Task 4b — AI Streaming Module (portable token-by-token responses)
+
+**Scope:** New folder `frontend/src/lib/ai/streaming/` only. No changes to existing files.
+
+**Architecture:**
+```
+frontend/src/lib/ai/streaming/
+  index.ts           — public API (streamRequest)
+  types.ts           — StreamConfig, StreamChunk, StreamCallbacks
+  providers/
+    openai.ts        — OpenAI / Groq / Custom (SSE, text/event-stream)
+    anthropic.ts     — Anthropic (SSE with anthropic-specific event types)
+    ollama.ts        — Ollama / BitNet (NDJSON, one JSON object per line)
+    gemini.ts        — Google Gemini (SSE)
+```
+
+**Public API (`index.ts`) must export:**
+```typescript
+streamRequest(config: StreamConfig, callbacks: StreamCallbacks): Promise<void>
+// Throws on fatal error (bad auth, unreachable host). Non-fatal chunks call onError.
+```
+
+**Types (`types.ts`):**
+```typescript
+interface StreamConfig {
+  provider: 'openai' | 'anthropic' | 'google' | 'groq' | 'ollama' | 'bitnet' | 'custom'
+  apiKey: string
+  model: string
+  baseUrl?: string             // required for ollama/bitnet/custom
+  prompt: string               // fully assembled prompt (from buildContext)
+  systemPrompt?: string
+  maxTokens?: number           // default 1024
+  temperature?: number         // default 0.7
+}
+
+interface StreamCallbacks {
+  onChunk: (text: string) => void      // called for each token/chunk received
+  onDone: (fullText: string) => void   // called once with complete response
+  onError: (error: Error) => void      // called on recoverable error
+}
+```
+
+**Requirements:**
+- Zero app imports — only `fetch` (available in React Native and Node 18+)
+- Each provider file implements one function: `streamProvider(config, callbacks): Promise<void>`
+- `index.ts` routes to the correct provider file based on `config.provider`
+- Ollama provider must handle both `/api/generate` (BitNet-compatible) and `/api/chat` endpoints
+- Anthropic provider must handle `content_block_delta` event type
+- Write Jest tests using `jest.fn()` mocks for `fetch`: OpenAI SSE chunks arrive in order, Ollama NDJSON chunks arrive in order, onDone called with full concatenated text, onError called on non-200 response
+- Run `npx jest --testPathPattern=ai/streaming` and paste output
+- Update `test_result.md`
+- **Guardrails apply.**
+
+---
+
+### Task 4c — AI Analysis Module (portable map-reduce whole-book analysis)
+
+**Scope:** New folder `frontend/src/lib/ai/analysis/` only. Tasks 4 and 4b must be complete first.
+
+**Architecture:**
+```
+frontend/src/lib/ai/analysis/
+  index.ts       — public API (analyzeBook, summarizeChunks)
+  mapReduce.ts   — chunk splitting and recursive summarize-combine logic
+  types.ts       — AnalysisRequest, AnalysisResult, AnalysisProgress
+```
+
+**Public API (`index.ts`) must export:**
+```typescript
+// Full map-reduce analysis of an entire book. Returns an AsyncGenerator that
+// yields progress events so the UI can show live status.
+analyzeBook(request: AnalysisRequest): AsyncGenerator<AnalysisProgress, AnalysisResult>
+
+// Summarize an array of text chunks into a single summary. Used recursively.
+summarizeChunks(
+  chunks: string[],
+  config: StreamConfig,
+  onProgress?: (done: number, total: number) => void
+): Promise<string>
+```
+
+**Types (`types.ts`):**
+```typescript
+interface AnalysisRequest {
+  fullText: string             // entire book content
+  providerConfig: StreamConfig // which AI to use
+  chunkSize?: number           // chars per chunk (default 8000 — fits most models)
+  task?: string                // "summarize" | "themes" | "characters" | "plot-holes"
+                               // default "summarize"
+}
+
+interface AnalysisProgress {
+  stage: 'chunking' | 'summarizing' | 'combining' | 'done'
+  chunksTotal: number
+  chunksDone: number
+  currentChunkPreview: string  // first 80 chars of chunk being processed
+}
+
+interface AnalysisResult {
+  summary: string              // final whole-book summary
+  styleProfile: StyleProfile   // extracted from first 3 chunks
+  chunksProcessed: number
+  tokensEstimated: number
+}
+```
+
+**Requirements:**
+- Zero app imports — uses `streamRequest` from `../streaming` and `buildContext`/`extractStyleProfile` from `../context`
+- `chunkSize` defaults to 8000 chars (~2000 tokens) so it fits within BitNet/small Ollama models
+- Map phase: summarize each chunk independently using `streamRequest`
+- Reduce phase: if more than one summary, recursively combine pairs until one remains
+- `analyzeBook` yields a progress event after each chunk completes so UI can show a live progress bar
+- `styleProfile` extracted from first 3 chunks only (representative sample, not full book)
+- Write Jest tests: chunking splits 100,000 chars into correct chunk count, summarizeChunks calls streamRequest once per chunk, recursive reduce converges to single result, progress events emitted in correct order
+- Run `npx jest --testPathPattern=ai/analysis` and paste output
+- Update `test_result.md`
+- **Guardrails apply.**
+
+---
+
+### Task 4d — Wire AI Modules into App (thin app-level callers)
+
+**Scope:** `frontend/src/lib/aiGateway.ts`, `frontend/src/components/editor/AIEditingPanel.tsx` only. Tasks 4, 4b, 4c must be complete first.
 
 **Prompt:**
-Implement a `buildContext()` function in `src/lib/aiGateway.ts` that assembles a sliding context window for AI calls on long documents. It must: (1) accept `{books: Book[], currentBookId: string, currentChapterIndex: number, selectedText: string, task: string}`, (2) load the current chapter's full text, (3) append the last 1,000 characters of the previous chapter (if exists) as "preceding context", (4) prepend the first 1,000 characters of the next chapter (if exists) as "following context", (5) generate and cache a book summary (max 500 tokens) stored in AsyncStorage key `@ebook/summary/{bookId}` — regenerate only if the book has been edited since last summary, (6) extract a style profile from chapters 1–3 (dominant tense, POV, average sentence length, any recurring proper nouns) stored as `@ebook/style/{bookId}`, (7) assemble the final prompt within a 4,000-token budget: `[style profile] + [book summary] + [prev tail] + [current chapter] + [next head] + [task instruction]`. Write Jest tests verifying: context includes prev/next chapter tails, respects token budget, summary is cached and not regenerated on second call, style profile is extracted correctly. Run `npx jest --testPathPattern=aiGateway` and paste output. Update `test_result.md`. **Guardrails apply.**
+Wire the portable AI modules into the app. In `aiGateway.ts`: (1) replace the existing inline context assembly with a call to `buildContext()` from `src/lib/ai/context/`, reading preceding/following text and cached summaries from AsyncStorage keys `@ebook/summary/{bookId}` and `@ebook/style/{bookId}` before passing them in, (2) add a `streamAIResponse(bookId, prompt, callbacks)` function that reads the active AI key from AsyncStorage, builds a `StreamConfig`, and delegates to `streamRequest()` from `src/lib/ai/streaming/`, (3) add a `runBookAnalysis(bookId, onProgress)` function that loads the book content, calls `analyzeBook()` from `src/lib/ai/analysis/`, and writes the resulting summary and style profile back to AsyncStorage. In `AIEditingPanel.tsx`: replace any direct `fetch` calls with `streamAIResponse()` so responses stream token-by-token into the UI (append to a `useState` string). Do not touch any portable module files. Write Jest tests mocking AsyncStorage: `streamAIResponse` reads active key and calls `streamRequest`, `runBookAnalysis` writes summary to correct AsyncStorage key. Run `npx jest --testPathPattern=aiGateway` and paste output. Update `test_result.md`. **Guardrails apply.**
 
 ---
 
 ### Task 5 — AI Suggestion Engine (standalone reusable module)
 
-**Scope:** New folder `frontend/src/lib/suggestions/` only. No UI changes. No changes to existing files.
+**Scope:** New folder `frontend/src/lib/suggestions/` only. No UI changes. No changes to existing files. Tasks 4 and 4b must be complete first (suggestions module uses `StreamConfig` from `src/lib/ai/streaming/types.ts`).
 
 **Architecture — this module must be self-contained and portable to other apps:**
 
 ```
 frontend/src/lib/suggestions/
   index.ts          — public API, the only file other code imports from
-  engine.ts         — core suggestion logic
+  engine.ts         — core suggestion logic (uses streamRequest from ai/streaming)
   presenter.ts      — formats raw AI response into SuggestionSet
   types.ts          — all exported types (no imports from app code)
-  context.ts        — assembles sliding context window (from Task 4 logic)
 ```
 
 **The public API (`index.ts`) must export only these:**
@@ -180,36 +387,24 @@ editSuggestion(set: SuggestionSet, id: string, newText: string): SuggestionSet
 
 **Types (`types.ts`):**
 ```typescript
-// Input — everything the engine needs, nothing app-specific
 interface SuggestionRequest {
-  originalText: string        // the text being worked on (selected or full chapter)
-  precedingContext?: string   // up to 1,000 chars before originalText
-  followingContext?: string   // up to 1,000 chars after originalText
-  styleProfile?: string       // author's style (tense, POV, voice)
-  bookSummary?: string        // what the book is about so far
-  mode: SuggestionMode        // what kind of suggestion to make
-  providerConfig: {           // AI provider — no app AsyncStorage coupling
-    provider: string
-    apiKey: string
-    model: string
-    customBaseUrl?: string
-  }
+  originalText: string
+  precedingContext?: string    // up to 1,000 chars — passed to buildContext()
+  followingContext?: string
+  styleProfile?: StyleProfile  // from src/lib/ai/context/types.ts
+  bookSummary?: string
+  mode: SuggestionMode
+  providerConfig: StreamConfig // from src/lib/ai/streaming/types.ts
 }
 
 type SuggestionMode =
-  | 'continue'    // add prose after the selection
-  | 'improve'     // rewrite for clarity/vividness
-  | 'shorten'     // reduce length, keep meaning
-  | 'expand'      // add depth and detail
-  | 'grammar'     // return array of corrections
-  | 'rephrase'    // offer 3 alternative wordings
+  | 'continue' | 'improve' | 'shorten' | 'expand' | 'grammar' | 'rephrase'
 
-// Output — one set of suggestions per request
 interface SuggestionSet {
   id: string
   mode: SuggestionMode
   originalText: string
-  suggestions: Suggestion[]   // 1 for prose modes, N for grammar/rephrase
+  suggestions: Suggestion[]
   status: 'pending' | 'ready' | 'error'
   error?: string
   requestedAt: number
@@ -217,11 +412,11 @@ interface SuggestionSet {
 
 interface Suggestion {
   id: string
-  text: string               // the suggested replacement text
-  diff?: DiffChunk[]         // character-level diff vs originalText
-  reason?: string            // why this change was suggested (grammar only)
-  offset?: number            // char offset in originalText (grammar only)
-  length?: number            // selection length in originalText (grammar only)
+  text: string
+  diff?: DiffChunk[]
+  reason?: string
+  offset?: number
+  length?: number
 }
 
 interface DiffChunk {
@@ -230,21 +425,23 @@ interface DiffChunk {
 }
 
 interface ApplyResult {
-  newText: string            // originalText with the suggestion applied
-  updatedSet: SuggestionSet  // set with that suggestion marked applied
+  newText: string
+  updatedSet: SuggestionSet
 }
 ```
 
 **Presentation rules (enforced by `presenter.ts`):**
-- Every suggestion must include a character-level diff (equal/insert/delete chunks) so the UI can show exactly what changed — highlighted deletions in red, insertions in green, unchanged text in normal color
-- Grammar mode returns one `Suggestion` per correction, each with `offset` + `length` pinpointing the error in `originalText`
-- Rephrase mode returns exactly 3 `Suggestion` objects
-- Prose modes (continue/improve/shorten/expand) return exactly 1 `Suggestion`
+- Every suggestion must include a character-level diff (equal/insert/delete chunks)
+- Grammar mode: one `Suggestion` per correction with `offset` + `length`
+- Rephrase mode: exactly 3 `Suggestion` objects
+- Prose modes: exactly 1 `Suggestion`
 
 **Requirements:**
-- Zero imports from app-level code (`storage.ts`, `aiGateway.ts`, React Native, Expo) — the module must work in any JS/TS environment
-- providerConfig is passed in by the caller — the module never touches AsyncStorage
-- Write Jest tests covering: all 6 modes return correct SuggestionSet shape, diff chunks are correct for a known input/output pair, applySuggestion produces correct newText, rejectSuggestion removes the suggestion from the set, editSuggestion updates suggestion text and regenerates diff
+- Zero imports from app-level code (`storage.ts`, `aiGateway.ts`, React Native, Expo)
+- `providerConfig` is passed in by the caller — never touches AsyncStorage
+- Uses `buildContext()` from `../ai/context` to assemble the prompt
+- Uses `streamRequest()` from `../ai/streaming` for the AI call
+- Write Jest tests: all 6 modes return correct SuggestionSet shape, diff chunks correct for known input/output pair, applySuggestion produces correct newText, rejectSuggestion removes suggestion, editSuggestion updates text and regenerates diff
 - Run `npx jest --testPathPattern=suggestions` and paste output
 - Update `test_result.md`
 - **Guardrails apply.**
