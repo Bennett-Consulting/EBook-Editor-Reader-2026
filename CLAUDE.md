@@ -155,12 +155,108 @@ Implement a `buildContext()` function in `src/lib/aiGateway.ts` that assembles a
 
 ---
 
-### Task 5 — Spell & Grammar Checking
+### Task 5 — AI Suggestion Engine (standalone reusable module)
 
-**Scope:** `frontend/src/lib/aiGateway.ts` (add grammar mode), `frontend/src/components/editor/AIEditingPanel.tsx` only.
+**Scope:** New folder `frontend/src/lib/suggestions/` only. No UI changes. No changes to existing files.
+
+**Architecture — this module must be self-contained and portable to other apps:**
+
+```
+frontend/src/lib/suggestions/
+  index.ts          — public API, the only file other code imports from
+  engine.ts         — core suggestion logic
+  presenter.ts      — formats raw AI response into SuggestionSet
+  types.ts          — all exported types (no imports from app code)
+  context.ts        — assembles sliding context window (from Task 4 logic)
+```
+
+**The public API (`index.ts`) must export only these:**
+```typescript
+requestSuggestions(input: SuggestionRequest): Promise<SuggestionSet>
+applySuggestion(set: SuggestionSet, id: string): ApplyResult
+rejectSuggestion(set: SuggestionSet, id: string): SuggestionSet
+editSuggestion(set: SuggestionSet, id: string, newText: string): SuggestionSet
+```
+
+**Types (`types.ts`):**
+```typescript
+// Input — everything the engine needs, nothing app-specific
+interface SuggestionRequest {
+  originalText: string        // the text being worked on (selected or full chapter)
+  precedingContext?: string   // up to 1,000 chars before originalText
+  followingContext?: string   // up to 1,000 chars after originalText
+  styleProfile?: string       // author's style (tense, POV, voice)
+  bookSummary?: string        // what the book is about so far
+  mode: SuggestionMode        // what kind of suggestion to make
+  providerConfig: {           // AI provider — no app AsyncStorage coupling
+    provider: string
+    apiKey: string
+    model: string
+    customBaseUrl?: string
+  }
+}
+
+type SuggestionMode =
+  | 'continue'    // add prose after the selection
+  | 'improve'     // rewrite for clarity/vividness
+  | 'shorten'     // reduce length, keep meaning
+  | 'expand'      // add depth and detail
+  | 'grammar'     // return array of corrections
+  | 'rephrase'    // offer 3 alternative wordings
+
+// Output — one set of suggestions per request
+interface SuggestionSet {
+  id: string
+  mode: SuggestionMode
+  originalText: string
+  suggestions: Suggestion[]   // 1 for prose modes, N for grammar/rephrase
+  status: 'pending' | 'ready' | 'error'
+  error?: string
+  requestedAt: number
+}
+
+interface Suggestion {
+  id: string
+  text: string               // the suggested replacement text
+  diff?: DiffChunk[]         // character-level diff vs originalText
+  reason?: string            // why this change was suggested (grammar only)
+  offset?: number            // char offset in originalText (grammar only)
+  length?: number            // selection length in originalText (grammar only)
+}
+
+interface DiffChunk {
+  type: 'equal' | 'insert' | 'delete'
+  text: string
+}
+
+interface ApplyResult {
+  newText: string            // originalText with the suggestion applied
+  updatedSet: SuggestionSet  // set with that suggestion marked applied
+}
+```
+
+**Presentation rules (enforced by `presenter.ts`):**
+- Every suggestion must include a character-level diff (equal/insert/delete chunks) so the UI can show exactly what changed — highlighted deletions in red, insertions in green, unchanged text in normal color
+- Grammar mode returns one `Suggestion` per correction, each with `offset` + `length` pinpointing the error in `originalText`
+- Rephrase mode returns exactly 3 `Suggestion` objects
+- Prose modes (continue/improve/shorten/expand) return exactly 1 `Suggestion`
+
+**Requirements:**
+- Zero imports from app-level code (`storage.ts`, `aiGateway.ts`, React Native, Expo) — the module must work in any JS/TS environment
+- providerConfig is passed in by the caller — the module never touches AsyncStorage
+- Write Jest tests covering: all 6 modes return correct SuggestionSet shape, diff chunks are correct for a known input/output pair, applySuggestion produces correct newText, rejectSuggestion removes the suggestion from the set, editSuggestion updates suggestion text and regenerates diff
+- Run `npx jest --testPathPattern=suggestions` and paste output
+- Update `test_result.md`
+- **Guardrails apply.**
+
+---
+
+### Task 5b — Wire Suggestion Engine into Editor UI
+
+**Scope:** `frontend/src/components/editor/AIEditingPanel.tsx` only. Task 5 must be complete first.
 
 **Prompt:**
-Add a `grammar` mode to `aiGateway.ts` and wire it into `AIEditingPanel.tsx`. Requirements: (1) the grammar prompt instructs the AI to return a JSON array of corrections: `[{offset: number, length: number, original: string, suggestion: string, reason: string}]`, (2) corrections are displayed inline in the editor with the original text highlighted and the suggestion shown on tap, (3) each correction has Accept (testID `grammar-accept-{n}`) and Ignore (testID `grammar-ignore-{n}`) buttons, (4) accepting a correction applies it to the text and records it in `editHistory`, (5) the style profile from Task 4 is passed as context so the AI does not flag intentional stylistic choices. Write Jest tests verifying: grammar prompt returns valid JSON structure, accept applies the correction, ignore removes it from the list. Run `npx jest --testPathPattern=grammar` and paste output. Update `test_result.md`. **Guardrails apply.**
+Wire the suggestion engine from `src/lib/suggestions/` into `AIEditingPanel.tsx`. The UI must: (1) show a loading state while `requestSuggestions()` is in flight (testID `suggestion-loading`), (2) display each `Suggestion` in a card showing the diff — deleted text in red strikethrough, inserted text in green, unchanged text in normal color, (3) provide three buttons per suggestion: Accept (testID `suggestion-accept-{id}`), Edit (testID `suggestion-edit-{id}`), Reject (testID `suggestion-reject-{id}`), (4) Edit opens an inline text field pre-filled with `suggestion.text` — user edits and confirms, which calls `editSuggestion()` then re-renders the diff, (5) Accept calls `applySuggestion()` and inserts `newText` into the editor replacing `originalText`, (6) Reject calls `rejectSuggestion()` and dismisses that card, (7) if all suggestions are rejected the panel shows an empty state with a "Try again" button. Do not change `suggestions/` module code. Do not change any other component. Write Jest tests for the component render states (loading, ready with suggestions, empty after all rejected). Run `npx jest --testPathPattern=AIEditingPanel` and paste output. Update `test_result.md`. **Guardrails apply.**
 
 ---
 
