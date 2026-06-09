@@ -139,6 +139,18 @@ frontend:
         agent: "main"
         comment: "Rewrote to return EpubChapter[] with title+content per chapter. Extracts headings from XHTML h1/h2/h3. Falls back to Chapter N if no heading. Added parseEpubData() for testability without file I/O. 9/9 Jest tests pass: title/author extraction, 5+ chapters, non-empty content, heading extraction, no HTML tags in output, flat content backward compat, invalid EPUB error, fallback chapter names."
 
+  - task: "AI analysis module — portable map-reduce whole-book analysis (Task 4c)"
+    implemented: true
+    working: true
+    file: "frontend/src/lib/ai/analysis/"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Built src/lib/ai/analysis/ with analyzeBook() AsyncGenerator and summarizeChunks(). mapReduce.ts: splitIntoChunks() (exact-length split, no loss), summarizeChunk() (one streamRequest per chunk), combineSummaries() (pair-wise reduce), reduceToOne() (recursive until single). analyzeBook yields progress events (chunking→summarizing→combining→done) so UI can show live progress bar. styleProfile extracted from first 3 chunks only. Zero app deps — uses streamRequest from ../streaming and extractStyleProfile/estimateTokens from ../context. 19/19 Jest tests pass (npx jest --testPathPattern=ai/analysis). streamRequest is mocked — no network calls."
+
   - task: "AI streaming module — portable token-by-token streaming (Task 4b)"
     implemented: true
     working: true
