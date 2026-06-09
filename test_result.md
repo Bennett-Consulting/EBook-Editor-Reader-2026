@@ -139,6 +139,21 @@ frontend:
         agent: "main"
         comment: "Rewrote to return EpubChapter[] with title+content per chapter. Extracts headings from XHTML h1/h2/h3. Falls back to Chapter N if no heading. Added parseEpubData() for testability without file I/O. 9/9 Jest tests pass: title/author extraction, 5+ chapters, non-empty content, heading extraction, no HTML tags in output, flat content backward compat, invalid EPUB error, fallback chapter names."
 
+  - task: "Pagination — long books split into pages in reader"
+    implemented: true
+    working: true
+    file: "frontend/app/reader/[id].tsx, frontend/src/lib/paginationEngine.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "paginationEngine.ts existed but was not wired into the reader. Long books were rendered as a single giant ScrollView, causing freezes on 400+ page books."
+      - working: true
+        agent: "main"
+        comment: "Wired paginate() into reader/[id].tsx: books over 50,000 chars are split into pages on load. Only current page rendered in memory. Page index saved to Book.scrollY via goToPage() and restored on re-open. Page X of Y indicator added (testID page-indicator). Prev/next arrow buttons (testIDs page-prev, page-next). clampPageIndex() added to paginationEngine.ts for safe save/restore. 129/129 Jest tests pass across both paginationEngine test suites. Known limitation: annotation/highlight indices are paragraph-local within a page, not global — annotations on long books will not show correctly in paginated mode (out of scope for this task)."
+
   - task: "EPUB import wired into Library UI"
     implemented: true
     working: true
@@ -305,3 +320,5 @@ agent_communication:
     message: "Task 1 complete. epubParser.ts rewritten to return EpubChapter[] with extracted titles and content. parseEpubData() added for unit testing. 9/9 Jest tests pass against synthetic 7-chapter EPUB. Next: Task 2 — wire into Library import UI."
   - agent: "main"
     message: "Task 2 complete. importEpubFromUri() extracted to storage.ts. index.tsx now shows import-loading spinner and import-error banner instead of Alert.alert. 13/13 Jest tests pass covering full import→save flow. Next: Task 3 — paginationEngine → reader."
+  - agent: "main"
+    message: "Task 3 complete. paginate() wired into reader/[id].tsx. Books over 50,000 chars split into pages, one page in memory at a time. goToPage() saves page index to Book.scrollY. Page X of Y indicator (testID page-indicator) and prev/next arrow buttons added. clampPageIndex() added to paginationEngine.ts. 129/129 Jest tests pass (npx jest --testPathPattern=paginationEngine). Known limitation documented: annotation highlighting uses page-local para indices in paginated mode. Next: Task 4 — AI sliding context window."

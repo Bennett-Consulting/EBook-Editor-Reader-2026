@@ -216,6 +216,15 @@ function findWordBoundary(text: string, target: number): number {
 // ─── Utility ────────────────────────────────────────────────────────────────
 
 /**
+ * Clamp a saved page index to a valid range.
+ * Returns 0 for any value that is out of range, non-integer, or non-finite.
+ */
+export function clampPageIndex(savedIndex: number, totalPages: number): number {
+  if (!Number.isFinite(savedIndex) || savedIndex < 0) return 0;
+  return Math.min(Math.floor(savedIndex), totalPages - 1);
+}
+
+/**
  * Estimate the metrics for the current screen. Useful for debugging
  * or displaying pagination stats.
  */
