@@ -52,6 +52,11 @@ jest.mock('expo-file-system', () => ({
   })),
 }));
 
+// Mock expo-file-system/legacy (old API surface — readAsStringAsync etc.)
+jest.mock('expo-file-system/legacy', () => ({
+  readAsStringAsync: jest.fn(),
+}));
+
 // Mock expo-sharing
 jest.mock('expo-sharing', () => ({
   isAvailableAsync: jest.fn().mockResolvedValue(true),

@@ -195,7 +195,60 @@ export default function ReaderScreen() {
     }
   }, [showTOC, showSearch, showSettings, showAnnotationsList, showExport]);
 
+  // ── Scroll to paragraph ──────────────────────────────────────────────────
+
+  const scrollToParagraph = useCallback((index: number) => {
+    const offsets = paraOffsetsRef.current;
+    if (offsets[index] !== undefined && scrollRef.current) {
+      scrollRef.current.scrollTo({ y: offsets[index] - 80, animated: true });
+    }
+  }, []);
+
+  // ── Search handlers ──────────────────────────────────────────────────────
+
+  const handleSearchHighlight = useCallback(
+    (matches: SearchMatch[], activeIndex: number) => {
+      setSearchMatches(matches);
+      setActiveSearchIdx(activeIndex);
+    },
+    []
+  );
+
+  const handleSearchNavigate = useCallback(
+    (paraIndex: number) => scrollToParagraph(paraIndex),
+    [scrollToParagraph]
+  );
+
+  // ── Bookmark ─────────────────────────────────────────────────────────────
+
+  const isCurrentBookmarked = useMemo(() => {
+    if (paragraphs.length === 0) return false;
+    const currentText = paragraphs[currentParagraph];
+    return currentText ? annotations.isHighlighted(currentParagraph, currentText) : false;
+  }, [currentParagraph, paragraphs, book?.annotations, annotations]);
+
+  const handleQuickBookmark = useCallback(async () => {
+    await annotations.toggleBookmark(currentParagraph);
+  }, [currentParagraph, annotations]);
+
+  // ── Animated toolbar ─────────────────────────────────────────────────────
+
+  const toolbarStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateY: withTiming(chromeVisible ? 0 : -80, {
+          duration: 250,
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        }),
+      },
+    ],
+    opacity: withTiming(chromeVisible ? 1 : 0, { duration: 200 }),
+  }));
+
   // ── Scroll tracking ──────────────────────────────────────────────────────
+  // All hooks must be above this early return (Rules of Hooks) — adding a
+  // hook below it crashes with "Rendered more hooks than during the previous
+  // render" the moment the book finishes loading.
 
   if (!book) {
     return (
@@ -239,30 +292,6 @@ export default function ReaderScreen() {
     await savePrefs(next);
   };
 
-  // ── Scroll to paragraph ──────────────────────────────────────────────────
-
-  const scrollToParagraph = useCallback((index: number) => {
-    const offsets = paraOffsetsRef.current;
-    if (offsets[index] !== undefined && scrollRef.current) {
-      scrollRef.current.scrollTo({ y: offsets[index] - 80, animated: true });
-    }
-  }, []);
-
-  // ── Search handlers ──────────────────────────────────────────────────────
-
-  const handleSearchHighlight = useCallback(
-    (matches: SearchMatch[], activeIndex: number) => {
-      setSearchMatches(matches);
-      setActiveSearchIdx(activeIndex);
-    },
-    []
-  );
-
-  const handleSearchNavigate = useCallback(
-    (paraIndex: number) => scrollToParagraph(paraIndex),
-    [scrollToParagraph]
-  );
-
   // ── Highlight actions ────────────────────────────────────────────────────
 
   const openHighlightModal = (paraIndex: number, paraText: string) => {
@@ -274,18 +303,6 @@ export default function ReaderScreen() {
     setHighlightTarget({ visible: false, paraIndex: -1, paraText: "" });
   };
 
-  // ── Bookmark ─────────────────────────────────────────────────────────────
-
-  const isCurrentBookmarked = useMemo(() => {
-    if (paragraphs.length === 0) return false;
-    const currentText = paragraphs[currentParagraph];
-    return currentText ? annotations.isHighlighted(currentParagraph, currentText) : false;
-  }, [currentParagraph, paragraphs, book?.annotations, annotations]);
-
-  const handleQuickBookmark = useCallback(async () => {
-    await annotations.toggleBookmark(currentParagraph);
-  }, [currentParagraph, annotations]);
-
   // ── Search highlight helper ──────────────────────────────────────────────
 
   const getSearchHighlight = (paraIndex: number) => {
@@ -295,20 +312,6 @@ export default function ReaderScreen() {
     const isActive = searchMatches[activeSearchIdx]?.paraIndex === paraIndex;
     return { match, isActive };
   };
-
-  // ── Animated toolbar ─────────────────────────────────────────────────────
-
-  const toolbarStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateY: withTiming(chromeVisible ? 0 : -80, {
-          duration: 250,
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-        }),
-      },
-    ],
-    opacity: withTiming(chromeVisible ? 1 : 0, { duration: 200 }),
-  }));
 
   // ── Render ───────────────────────────────────────────────────────────────
 

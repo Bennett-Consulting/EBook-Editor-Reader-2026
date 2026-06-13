@@ -139,6 +139,30 @@ frontend:
         agent: "main"
         comment: "Rewrote to return EpubChapter[] with title+content per chapter. Extracts headings from XHTML h1/h2/h3. Falls back to Chapter N if no heading. Added parseEpubData() for testability without file I/O. 9/9 Jest tests pass: title/author extraction, 5+ chapters, non-empty content, heading extraction, no HTML tags in output, flat content backward compat, invalid EPUB error, fallback chapter names."
 
+  - task: "Task 5b — Wire Suggestion Engine into AIEditingPanel"
+    implemented: true
+    working: true
+    file: "frontend/src/components/editor/AIEditingPanel.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added sg-improve/sg-shorten/sg-expand/sg-rephrase modes and upgraded grammar tab to use the Task 5 suggestion engine. New sub-components: DiffDisplay (colored equal/insert/delete inline text), SuggestionResults dispatcher, GrammarSuggestionResults (per-correction Fix/Skip buttons + context preview + diff), ProseSuggestionResult (diff view + Replace button), RephraseResults (3 cards + Use this). buildStreamConfig() helper reads active key via getActiveAIKey + discoverModels + pickBestModel — no hardcoded model IDs. handleApplyAllGrammar applies all corrections right-to-left to preserve offsets, then calls onReplaceAll. All existing modes (stream-continue, spellcheck, tone, screenplay) and all 392 Jest tests pass unchanged. UI components untestable in node jest environment — requires manual verification on device."
+
+  - task: "AI Suggestion Engine — portable requestSuggestions/apply/reject/edit (Task 5)"
+    implemented: true
+    working: true
+    file: "frontend/src/lib/suggestions/"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Built src/lib/suggestions/ — portable, zero app deps. Four files: types.ts (all types), engine.ts (callAI: buildContext + streamRequest), presenter.ts (parseSuggestions + computeDiff), index.ts (public API). Six modes: continue (1 suggestion, appended), improve/shorten/expand (1 suggestion, replacement), grammar (0..N corrections with offset+length, JSON-parsed from AI response, redundant-occurrence-safe using usedRanges tracker), rephrase (exactly 3, padded if AI returns fewer). computeDiff: LCS-based character-level diff up to 200,000 cells, delete/insert fallback for larger inputs. continue mode skips LCS and uses direct equal+insert to avoid ambiguous LCS paths through the appended portion. Grammar corrections: AI returns {original, correction} pairs; module finds offset via indexOf (with usedRanges to handle repeated strings). Grammar response parsing strips markdown code fences. requestSuggestions never throws — returns status:'error' set on failure. 41/41 Jest tests pass (npx jest --testPathPattern=suggestions)."
+
   - task: "AI server discovery — mDNS + .well-known + subdomain probing (Task 4e)"
     implemented: true
     working: true
@@ -333,6 +357,9 @@ frontend:
       - working: true
         agent: "testing"
         comment: "Iteration 4: Replaced Alert.alert with ExportSheet modal component. ExportSheet now renders in both Reader and Editor with stable testIDs (export-pdf, export-epub, export-docx, export-md, export-txt, export-cancel). All 6 export test cases pass on web preview. Editor export-btn now correctly calls setShowExport(true) instead of Alert.alert."
+      - working: true
+        agent: "main"
+        comment: "Task 6: ANDROID DEVICE VERIFICATION COMPLETE — all 5 formats verified on Android emulator (API 29 x86_64, headless, app driven through real UI: editor → ⋯ menu → Export). Fixture: 7-chapter synthetic Pride and Prejudice EPUB content (874 chars, identical to epubParser test fixture) seeded as Book. Evidence (file path on device, size in bytes, content verification): PDF /data/data/com.bennettconsulting.ebookeditor/cache/Print/2ffaf554-bea4-4fd1-945f-e7bb1a713c77.pdf 34,517 B (pulled, magic %PDF-1.4, share sheet opened); EPUB cache/Pride_and_Prejudice.epub 3,760 B (pulled, valid ZIP, mimetype=application/epub+zip, container.xml+content.opf+nav.xhtml+style.css+chapter0.xhtml, Chapter I–VII text present); DOCX cache/Pride_and_Prejudice.docx 6,859 B (pulled, valid OOXML: [Content_Types].xml, rels, styles.xml, footer1.xml, document.xml with full content); MD cache/Pride_and_Prejudice.md 920 B ('# Pride and Prejudice / _by Jane Austen_' header + content); TXT cache/Pride_and_Prejudice.txt 952 B (title/author/ruler header + content). NO CHANGES to exporter.ts were needed — it worked as written on Android (new expo-file-system File API + expo-print + expo-sharing all functional). Observation (not a failure): exporter parseBlocks only detects 'Chapter <digits>' or markdown # headings as chapter breaks, so Roman-numeral headings (Chapter I, II…) export as a single EPUB chapter / no DOCX page breaks. All content is preserved."
 
   - task: "Delete flows - delete-book-btn (editor), draft-delete (write tab), library long-press"
     implemented: true
@@ -396,3 +423,7 @@ agent_communication:
     message: "Task 3b complete. usePagination hook and PageNavBar component extracted. Pure helpers (splitPageText, computePageParaOffset, PAGINATION_THRESHOLD) exported and tested. reader/[id].tsx simplified to hook call + component. 144/144 Jest tests pass. Both files are portable — zero app-level dependencies. Next: Task 4 — AI sliding context window."
   - agent: "main"
     message: "Task 3 complete. paginate() wired into reader/[id].tsx. Books over 50,000 chars split into pages, one page in memory at a time. goToPage() saves page index to Book.scrollY. Page X of Y indicator (testID page-indicator) and prev/next arrow buttons added. clampPageIndex() added to paginationEngine.ts. 129/129 Jest tests pass (npx jest --testPathPattern=paginationEngine). Known limitation documented: annotation highlighting uses page-local para indices in paginated mode. Next: Task 4 — AI sliding context window."
+  - agent: "main"
+    message: "Task 5 complete. Portable AI Suggestion Engine built at src/lib/suggestions/. Six modes (continue/improve/shorten/expand/grammar/rephrase), character-level LCS diff, grammar JSON parsing with offset tracking, never-throw requestSuggestions(). Fixed: continue mode uses direct equal+insert diff (not LCS) to avoid ambiguous paths through appended text; parseProseSuggestion trims trailing whitespace only for continue mode to preserve leading space. 41/41 Jest tests pass (npx jest --testPathPattern=suggestions). Next: Task 5b — wire into AIEditingPanel.tsx."
+  - agent: "main"
+    message: "Task 6 complete. All 5 export formats (PDF 34,517 B / EPUB 3,760 B / DOCX 6,859 B / MD 920 B / TXT 952 B) verified on a real Android emulator via the actual app UI — file existence, size > 0, and format magic/internal structure confirmed by pulling each file off the device. exporter.ts required NO fixes. BUILD INFRASTRUCTURE CHANGES that were required to get any Android build at all (first native build of this project): (1) package.json was misaligned — expo@56 pinned against the SDK 54 core pairing react-native@0.81.5/react@19.1.0; ran npx expo install --fix (user-approved) → react-native@0.85.3, react@19.2.3, all expo-* aligned to SDK 56; (2) added react-native-worklets (required by reanimated 4 on SDK 56); (3) CMake 3.22.1 has a VerifyGlobs/ninja loop bug on Windows ('manifest build.ninja still dirty after 100 tries') — installed portable CMake 3.31.8 at %LOCALAPPDATA%/Android/cmake-3.31.8-windows-x86_64, set cmake.dir in android/local.properties AND env CMAKE_VERSION=3.31.8 (reanimated reads it, build.gradle line 189); (4) duplicate lib/**/libworklets.so from expo-modules-core vs react-native-worklets at :app:mergeDebugNativeLibs — passed -Pandroid.packagingOptions.pickFirsts=lib/**/libworklets.so on the gradle command line (same-size artifacts, differing only in build stamps). OUT-OF-SCOPE BUGS FOUND (documented, NOT fixed, per guardrails): (A) BLOCKER on Android: EPUB import is broken — SDK 56 removed readAsStringAsync from the expo-file-system main module; epubParser.ts/import flow must import from 'expo-file-system/legacy' or migrate to the File API. App shows red error banner when picking an EPUB. (B) BLOCKER on Android: ReaderScreen (app/reader/[id].tsx) crashes with React 'Rendered more hooks than during the previous render' (conditional useCallback — Rules of Hooks violation) the moment any book is opened in the reader; reader is unusable in the native dev build. Export was verified through the EDITOR's export path instead (editor ⋯ menu → Export), which shares the same ExportSheet + exporter.ts. (C) npm install fails with ERESOLVE (jest-expo@56 wants react@^19.2.3) unless legacy-peer-deps is set. TEST ENVIRONMENT NOTES: Medium_Tablet AVD (API 34, 2560x1600) could not boot on this 8 GB host — corrupt userdata (fixed by wipe) plus the image is too heavy for WHPX+software rendering (app ANRs even after boot). Created lightweight Test29 AVD (API 29 x86_64, 1280x800, 1.5 GB) — boots in ~2 min headless with swiftshader and runs the app fine. Medium_Tablet config.ini resolution was lowered to 1280x800@160 during diagnosis; revert to 2560x1600@320 if desired."

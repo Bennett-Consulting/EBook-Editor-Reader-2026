@@ -113,9 +113,9 @@ Be honest about this before starting any task:
 - **AI streaming** — ✓ done (Task 4b): `src/lib/ai/streaming/`
 - **Whole-book analysis** — ✓ done (Task 4c): `src/lib/ai/analysis/`
 - **AI context + wire-up** — ✓ done (Tasks 4 + 4d): `src/lib/ai/context/`, `aiGateway.ts`
-- **AI server discovery** — not built yet (Task 4e): `src/lib/ai/discovery/` — mDNS + .well-known + subdomain
-- **AI suggestion engine** — not built yet (Task 5): `src/lib/suggestions/` standalone module
-- **Spell/grammar checking** — will be handled as a suggestion mode in Task 5
+- **AI server discovery** — ✓ done (Task 4e): `src/lib/ai/discovery/` — mDNS + .well-known + subdomain
+- **AI suggestion engine** — ✓ done (Task 5): `src/lib/suggestions/` — requestSuggestions/apply/reject/edit, 6 modes, char-level diff
+- **Spell/grammar checking** — ✓ handled by grammar mode in Task 5 (`src/lib/suggestions/`)
 - **Export on Android** — not verified on device (Task 6); only web-tested (broken for print/sharing)
 
 ---
