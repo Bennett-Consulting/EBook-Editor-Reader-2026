@@ -21,6 +21,9 @@ CONTEXT = (
 def api():
     s = requests.Session()
     s.headers.update({"Content-Type": "application/json"})
+    key = os.environ.get("OPENAI_API_KEY")
+    if key:
+        s.headers.update({"Authorization": f"Bearer {key}"})
     return s
 
 

@@ -104,3 +104,55 @@ export async function getActiveAIKey(): Promise<SavedAIKey | null> {
   const keys = await getAIKeys();
   return keys.find((k) => k.id === activeId) ?? null;
 }
+
+// ─── EPUB Import ─────────────────────────────────────────────────────────────
+
+function makeId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function sanitizeContent(s: string): string {
+  return s
+    .replace(/<[^>]+>/g, "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F﻿]/g, "")
+    .trim();
+}
+
+/**
+ * Parse an EPUB at the given URI, build a Book, save it, and return it.
+ * Extracted here so the full import→save flow is testable without mounting a component.
+ */
+export async function importEpubFromUri(
+  uri: string,
+  filename: string,
+  coverColor: string
+): Promise<Book> {
+  const { parseEpub } = await import("./epubParser");
+  const parsed = await parseEpub(uri);
+
+  const content = sanitizeContent(parsed.content);
+  if (!content) throw new Error("This EPUB appears to be empty.");
+
+  const title =
+    parsed.title ||
+    filename.replace(/\.epub$/i, "").slice(0, 80) ||
+    "Untitled";
+
+  const book: Book = {
+    id: makeId(),
+    title,
+    author: parsed.author || "Imported",
+    content,
+    format: "epub",
+    coverColor,
+    coverEmoji: "📚",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    progress: 0,
+    annotations: [],
+    isDraft: false,
+  };
+
+  await saveBook(book);
+  return book;
+}

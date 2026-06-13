@@ -4,7 +4,7 @@ Ebook Reader & Editor — Backend API
 Standalone backend using direct OpenAI API calls and SQLite.
 No external platform dependencies (Emergent, MongoDB, etc.).
 """
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Header
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
@@ -52,7 +52,7 @@ def get_db():
 
 
 # --- OpenAI config ---
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+# No global server-side keys stored. Keys must be passed dynamically in the request Authorization headers.
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -125,9 +125,16 @@ def _system_prompt(mode: str) -> str:
 
 
 @api_router.post("/ai/suggest", response_model=AISuggestResponse)
-async def ai_suggest(req: AISuggestRequest):
-    if not OPENAI_API_KEY:
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
+async def ai_suggest(req: AISuggestRequest, authorization: Optional[str] = Header(None)):
+    api_key = None
+    if authorization and authorization.lower().startswith("bearer "):
+        api_key = authorization[7:].strip()
+
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid Authorization header. Please pass 'Bearer YOUR_OPENAI_API_KEY'."
+        )
 
     if not req.context or not req.context.strip():
         raise HTTPException(status_code=400, detail="context is required")
@@ -139,7 +146,7 @@ async def ai_suggest(req: AISuggestRequest):
             resp = await client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
